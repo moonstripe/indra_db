@@ -26,6 +26,11 @@ Most agent memory systems are **state-based**: here's what I know *now*. But und
 ```toml
 [dependencies]
 indra_db = "0.1"
+
+# Optional: Enable embedding features
+indra_db = { version = "0.1", features = ["hf-embeddings"] }  # Local models
+indra_db = { version = "0.1", features = ["api-embeddings"] }  # API providers
+indra_db = { version = "0.1", features = ["hf-embeddings", "api-embeddings"] }  # Both
 ```
 
 ### As a CLI
@@ -95,7 +100,7 @@ indra checkout main  # original "cats" still intact
 ### Library Usage
 
 ```rust
-use indra_db::{Database, MockEmbedder, TraversalDirection};
+use indra_db::{Database, embedding::MockEmbedder, TraversalDirection};
 
 fn main() -> anyhow::Result<()> {
     // Open or create database with embedder
@@ -127,6 +132,56 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 ```
+
+#### With HuggingFace Models (Local)
+
+```rust
+#[cfg(feature = "hf-embeddings")]
+use indra_db::embedding::HFEmbedder;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    // Download and cache model (only once)
+    let embedder = HFEmbedder::new("sentence-transformers/all-MiniLM-L6-v2").await?;
+    
+    let mut db = Database::open_or_create("thoughts.indra")?
+        .with_embedder(embedder);
+
+    let thought = db.create_thought("Rust is a systems programming language")?;
+    db.commit("Add Rust thought")?;
+
+    // Semantic search now uses actual transformer embeddings!
+    let results = db.search("programming languages", 5)?;
+    
+    Ok(())
+}
+```
+
+#### With OpenAI API
+
+```rust
+#[cfg(feature = "api-embeddings")]
+use indra_db::embedding::{ApiEmbedder, ApiProvider};
+
+fn main() -> anyhow::Result<()> {
+    // Requires OPENAI_API_KEY env var
+    let embedder = ApiEmbedder::new(
+        ApiProvider::OpenAI,
+        "text-embedding-3-small",
+        1536
+    )?;
+    
+    let mut db = Database::open_or_create("thoughts.indra")?
+        .with_embedder(embedder);
+
+    let thought = db.create_thought("AI agents need memory")?;
+    db.commit("Add AI thought")?;
+
+    Ok(())
+}
+```
+
+**See [EMBEDDINGS.md](EMBEDDINGS.md) for detailed embedding configuration.**
 
 ## CLI Reference
 

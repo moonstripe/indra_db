@@ -47,6 +47,15 @@ bytes = "1.5"
 # CLI
 clap = { version = "4.5", features = ["derive"] }
 
+# Embeddings (optional features)
+candle-core = { version = "0.8", optional = true }
+candle-nn = { version = "0.8", optional = true }
+candle-transformers = { version = "0.8", optional = true }
+hf-hub = { version = "0.3", optional = true, features = ["tokio"] }
+tokenizers = { version = "0.21", optional = true }
+tokio = { version = "1.42", optional = true, features = ["full"] }
+reqwest = { version = "0.12", optional = true, features = ["json"] }
+
 [dev-dependencies]
 tempfile = "3.10"
 criterion = "0.5"
@@ -54,3 +63,8 @@ criterion = "0.5"
 [profile.release]
 lto = true
 codegen-units = 1
+
+[features]
+default = []
+hf-embeddings = ["candle-core", "candle-nn", "candle-transformers", "hf-hub", "tokenizers", "tokio"]
+api-embeddings = ["reqwest", "tokio"]
