@@ -1,1 +1,3 @@
 /target
+src/mcp/
+.DS_Store
