@@ -32,8 +32,8 @@ struct Cli {
     #[arg(long)]
     no_auto_commit: bool,
 
-    /// Embedding provider: mock, hf, openai, cohere, voyage
-    #[arg(long, default_value = "mock")]
+    /// Embedding provider: hf (default), mock, openai, cohere, voyage
+    #[arg(long, default_value = "hf")]
     embedder: String,
 
     /// Model name for embedder (e.g., "sentence-transformers/all-MiniLM-L6-v2" for HF, "text-embedding-3-small" for OpenAI)
