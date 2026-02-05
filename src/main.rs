@@ -4,8 +4,16 @@
 //! Designed to be wrapped by MCP servers in other languages (e.g., TypeScript/Bun).
 
 use clap::{Parser, Subcommand};
-use indra_db::{Database, EdgeType, MockEmbedder, TraversalDirection};
+use indra_db::{Database, EdgeType, TraversalDirection};
 use std::path::PathBuf;
+
+#[cfg(feature = "hf-embeddings")]
+use indra_db::embedding::HFEmbedder;
+
+#[cfg(feature = "api-embeddings")]
+use indra_db::embedding::{ApiEmbedder, ApiProvider};
+
+use indra_db::embedding::MockEmbedder;
 
 #[derive(Parser)]
 #[command(name = "indra")]
@@ -23,6 +31,18 @@ struct Cli {
     /// Disable auto-commit (by default, mutating commands auto-commit)
     #[arg(long)]
     no_auto_commit: bool,
+
+    /// Embedding provider: mock, hf, openai, cohere, voyage
+    #[arg(long, default_value = "mock")]
+    embedder: String,
+
+    /// Model name for embedder (e.g., "sentence-transformers/all-MiniLM-L6-v2" for HF, "text-embedding-3-small" for OpenAI)
+    #[arg(long)]
+    model: Option<String>,
+
+    /// Embedding dimension (required for API embedders)
+    #[arg(long)]
+    dimension: Option<usize>,
 
     #[command(subcommand)]
     command: Commands,
@@ -187,7 +207,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         Commands::Create { content, id } => {
-            let mut db = open_db(&cli.database)?;
+            let mut db = open_db(&cli.database, &cli.embedder, cli.model.clone(), cli.dimension)?;
             let thought_id = if let Some(id) = id {
                 db.create_thought_with_id(id, &content)?
             } else {
@@ -208,7 +228,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         Commands::Get { id } => {
-            let db = open_db(&cli.database)?;
+            let db = open_db(&cli.database, &cli.embedder, cli.model.clone(), cli.dimension)?;
             let thought_id = indra_db::ThoughtId::new(&id);
             match db.get_thought(&thought_id)? {
                 Some(thought) => {
@@ -239,7 +259,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         Commands::Update { id, content } => {
-            let mut db = open_db(&cli.database)?;
+            let mut db = open_db(&cli.database, &cli.embedder, cli.model.clone(), cli.dimension)?;
             let thought_id = indra_db::ThoughtId::new(&id);
             db.update_thought(&thought_id, &content)?;
             if !cli.no_auto_commit {
@@ -255,7 +275,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         Commands::Delete { id } => {
-            let mut db = open_db(&cli.database)?;
+            let mut db = open_db(&cli.database, &cli.embedder, cli.model.clone(), cli.dimension)?;
             let thought_id = indra_db::ThoughtId::new(&id);
             db.delete_thought(&thought_id)?;
             if !cli.no_auto_commit {
@@ -271,7 +291,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         Commands::List { limit } => {
-            let db = open_db(&cli.database)?;
+            let db = open_db(&cli.database, &cli.embedder, cli.model.clone(), cli.dimension)?;
             let mut thoughts = db.list_thoughts()?;
             if let Some(limit) = limit {
                 thoughts.truncate(limit);
@@ -302,7 +322,7 @@ fn main() -> anyhow::Result<()> {
             edge_type,
             weight,
         } => {
-            let mut db = open_db(&cli.database)?;
+            let mut db = open_db(&cli.database, &cli.embedder, cli.model.clone(), cli.dimension)?;
             if let Some(w) = weight {
                 db.relate_weighted(&source, &target, EdgeType::new(&edge_type), w)?;
             } else {
@@ -327,7 +347,7 @@ fn main() -> anyhow::Result<()> {
             target,
             edge_type,
         } => {
-            let mut db = open_db(&cli.database)?;
+            let mut db = open_db(&cli.database, &cli.embedder, cli.model.clone(), cli.dimension)?;
             db.unrelate(&source, &target, EdgeType::new(&edge_type))?;
             if !cli.no_auto_commit {
                 db.commit_with_author("Auto-commit: remove relation", "indra-cli")?;
@@ -344,7 +364,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         Commands::Neighbors { id, direction } => {
-            let db = open_db(&cli.database)?;
+            let db = open_db(&cli.database, &cli.embedder, cli.model.clone(), cli.dimension)?;
             let thought_id = indra_db::ThoughtId::new(&id);
             let dir = match direction.as_str() {
                 "outgoing" | "out" => TraversalDirection::Outgoing,
@@ -383,7 +403,7 @@ fn main() -> anyhow::Result<()> {
             limit,
             threshold,
         } => {
-            let db = open_db(&cli.database)?;
+            let db = open_db(&cli.database, &cli.embedder, cli.model.clone(), cli.dimension)?;
             let results = if let Some(t) = threshold {
                 db.search_with_threshold(&query, t, limit)?
             } else {
@@ -410,7 +430,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         Commands::Commit { message, author } => {
-            let mut db = open_db(&cli.database)?;
+            let mut db = open_db(&cli.database, &cli.embedder, cli.model.clone(), cli.dimension)?;
             let hash = db.commit_with_author(&message, &author)?;
             output(
                 &cli.format,
@@ -423,7 +443,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         Commands::Log { limit } => {
-            let db = open_db(&cli.database)?;
+            let db = open_db(&cli.database, &cli.embedder, cli.model.clone(), cli.dimension)?;
             let log = db.log(limit)?;
             let items: Vec<_> = log
                 .iter()
@@ -447,7 +467,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         Commands::Branch { name } => {
-            let db = open_db(&cli.database)?;
+            let db = open_db(&cli.database, &cli.embedder, cli.model.clone(), cli.dimension)?;
             db.create_branch(&name)?;
             output(
                 &cli.format,
@@ -459,7 +479,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         Commands::Checkout { name } => {
-            let mut db = open_db(&cli.database)?;
+            let mut db = open_db(&cli.database, &cli.embedder, cli.model.clone(), cli.dimension)?;
             db.checkout(&name)?;
             output(
                 &cli.format,
@@ -471,7 +491,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         Commands::Branches => {
-            let db = open_db(&cli.database)?;
+            let db = open_db(&cli.database, &cli.embedder, cli.model.clone(), cli.dimension)?;
             let current = db.current_branch();
             let branches = db.list_branches();
             let items: Vec<_> = branches
@@ -494,7 +514,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         Commands::Diff { from, to } => {
-            let db = open_db(&cli.database)?;
+            let db = open_db(&cli.database, &cli.embedder, cli.model.clone(), cli.dimension)?;
             let log = db.log(None)?;
 
             let from_hash = resolve_ref(&from, &log)?;
@@ -547,7 +567,7 @@ fn main() -> anyhow::Result<()> {
         }
 
         Commands::Status => {
-            let db = open_db(&cli.database)?;
+            let db = open_db(&cli.database, &cli.embedder, cli.model.clone(), cli.dimension)?;
             output(
                 &cli.format,
                 &serde_json::json!({
@@ -562,9 +582,68 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn open_db(path: &PathBuf) -> anyhow::Result<Database> {
-    let db = Database::open_or_create(path)?.with_embedder(MockEmbedder::default());
-    Ok(db)
+fn open_db(
+    path: &PathBuf,
+    embedder_type: &str,
+    model: Option<String>,
+    dimension: Option<usize>,
+) -> anyhow::Result<Database> {
+    let db = Database::open_or_create(path)?;
+
+    match embedder_type {
+        "mock" => Ok(db.with_embedder(MockEmbedder::default())),
+
+        #[cfg(feature = "hf-embeddings")]
+        "hf" => {
+            let model_name =
+                model.unwrap_or_else(|| "sentence-transformers/all-MiniLM-L6-v2".to_string());
+            eprintln!("Loading HF model: {}", model_name);
+            let embedder =
+                tokio::runtime::Runtime::new()?.block_on(HFEmbedder::new(&model_name))?;
+            Ok(db.with_embedder(embedder))
+        }
+
+        #[cfg(feature = "api-embeddings")]
+        "openai" => {
+            let model_name = model.unwrap_or_else(|| "text-embedding-3-small".to_string());
+            let dim = dimension.unwrap_or(1536);
+            let embedder = ApiEmbedder::new(ApiProvider::OpenAI, &model_name, dim)?;
+            Ok(db.with_embedder(embedder))
+        }
+
+        #[cfg(feature = "api-embeddings")]
+        "cohere" => {
+            let model_name = model.unwrap_or_else(|| "embed-english-v3.0".to_string());
+            let dim = dimension.unwrap_or(1024);
+            let embedder = ApiEmbedder::new(ApiProvider::Cohere, &model_name, dim)?;
+            Ok(db.with_embedder(embedder))
+        }
+
+        #[cfg(feature = "api-embeddings")]
+        "voyage" => {
+            let model_name = model.unwrap_or_else(|| "voyage-3".to_string());
+            let dim = dimension.unwrap_or(1024);
+            let embedder = ApiEmbedder::new(ApiProvider::Voyage, &model_name, dim)?;
+            Ok(db.with_embedder(embedder))
+        }
+
+        _ => {
+            #[cfg(not(feature = "hf-embeddings"))]
+            if embedder_type == "hf" {
+                anyhow::bail!("HF embedder not available. Compile with --features hf-embeddings");
+            }
+
+            #[cfg(not(feature = "api-embeddings"))]
+            if ["openai", "cohere", "voyage"].contains(&embedder_type) {
+                anyhow::bail!("API embedder not available. Compile with --features api-embeddings");
+            }
+
+            anyhow::bail!(
+                "Unknown embedder: {}. Use: mock, hf, openai, cohere, or voyage",
+                embedder_type
+            )
+        }
+    }
 }
 
 fn output(format: &OutputFormat, value: &serde_json::Value) {
