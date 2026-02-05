@@ -1,0 +1,240 @@
+name: Release Binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g., v0.1.1)'
+        required: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS Intel
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            binary_name: indra
+            archive_name: indra-x86_64-apple-darwin.tar.gz
+
+          # macOS Apple Silicon
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            binary_name: indra
+            archive_name: indra-aarch64-apple-darwin.tar.gz
+
+          # Linux x86_64 (glibc)
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            binary_name: indra
+            archive_name: indra-x86_64-unknown-linux-gnu.tar.gz
+
+          # Linux x86_64 (musl - static)
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            binary_name: indra
+            archive_name: indra-x86_64-unknown-linux-musl.tar.gz
+
+          # Linux ARM64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            binary_name: indra
+            archive_name: indra-aarch64-unknown-linux-gnu.tar.gz
+
+          # Linux ARM64 (musl)
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            binary_name: indra
+            archive_name: indra-aarch64-unknown-linux-musl.tar.gz
+
+          # Raspberry Pi (ARMv7)
+          - target: armv7-unknown-linux-gnueabihf
+            os: ubuntu-latest
+            binary_name: indra
+            archive_name: indra-armv7-unknown-linux-gnueabihf.tar.gz
+
+          # Windows x86_64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            binary_name: indra.exe
+            archive_name: indra-x86_64-pc-windows-msvc.zip
+
+          # Windows ARM64
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            binary_name: indra.exe
+            archive_name: indra-aarch64-pc-windows-msvc.zip
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache target directory
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-target-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install cross-compilation tools (Linux ARM)
+        if: runner.os == 'Linux' && contains(matrix.target, 'aarch64')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Install cross-compilation tools (Linux ARMv7)
+        if: runner.os == 'Linux' && contains(matrix.target, 'armv7')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-linux-gnueabihf
+
+      - name: Install musl tools
+        if: contains(matrix.target, 'musl')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Build binary
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Strip binary (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          strip target/${{ matrix.target }}/release/${{ matrix.binary_name }} || true
+
+      - name: Create archive (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../${{ matrix.archive_name }} ${{ matrix.binary_name }}
+          cd ../../..
+          ls -lh ${{ matrix.archive_name }}
+
+      - name: Create archive (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cd target/${{ matrix.target }}/release
+          Compress-Archive -Path ${{ matrix.binary_name }} -DestinationPath ../../../${{ matrix.archive_name }}
+          cd ../../..
+          dir ${{ matrix.archive_name }}
+
+      - name: Generate checksum
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            certutil -hashfile ${{ matrix.archive_name }} SHA256 | grep -v "SHA256" | grep -v "CertUtil" > ${{ matrix.archive_name }}.sha256
+          else
+            shasum -a 256 ${{ matrix.archive_name }} > ${{ matrix.archive_name }}.sha256
+          fi
+          cat ${{ matrix.archive_name }}.sha256
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            ${{ matrix.archive_name }}
+            ${{ matrix.archive_name }}.sha256
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir release-assets
+          find artifacts -type f -exec cp {} release-assets/ \;
+          ls -lh release-assets/
+
+      - name: Extract version from tag
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.tag }}" ]; then
+            echo "version=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.get_version.outputs.version }}
+          name: Release ${{ steps.get_version.outputs.version }}
+          draft: false
+          prerelease: false
+          files: release-assets/*
+          body: |
+            ## indra_db ${{ steps.get_version.outputs.version }}
+
+            ### Installation
+
+            **Via cargo:**
+            ```bash
+            cargo install indra_db
+            ```
+
+            **Via prebuilt binary:**
+            Download the appropriate binary for your platform below, extract it, and add to your PATH.
+
+            ### Binaries
+
+            - **macOS Intel**: `indra-x86_64-apple-darwin.tar.gz`
+            - **macOS Apple Silicon**: `indra-aarch64-apple-darwin.tar.gz`
+            - **Linux x86_64 (glibc)**: `indra-x86_64-unknown-linux-gnu.tar.gz`
+            - **Linux x86_64 (musl/static)**: `indra-x86_64-unknown-linux-musl.tar.gz`
+            - **Linux ARM64**: `indra-aarch64-unknown-linux-gnu.tar.gz`
+            - **Linux ARM64 (musl)**: `indra-aarch64-unknown-linux-musl.tar.gz`
+            - **Raspberry Pi (ARMv7)**: `indra-armv7-unknown-linux-gnueabihf.tar.gz`
+            - **Windows x86_64**: `indra-x86_64-pc-windows-msvc.zip`
+            - **Windows ARM64**: `indra-aarch64-pc-windows-msvc.zip`
+
+            SHA256 checksums are provided for verification.
+
+            ### Usage
+
+            ```bash
+            indra --help
+            ```
+
+            See [README](https://github.com/moonstripe/indra_db#readme) for full documentation.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

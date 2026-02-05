@@ -30,9 +30,34 @@ indra_db = "0.1"
 
 ### As a CLI
 
+**Via cargo:**
 ```bash
 cargo install indra_db
 ```
+
+**Via prebuilt binary:**
+
+Download the latest release for your platform from [GitHub Releases](https://github.com/moonstripe/indra_db/releases):
+
+```bash
+# macOS (Apple Silicon)
+curl -L https://github.com/moonstripe/indra_db/releases/latest/download/indra-aarch64-apple-darwin.tar.gz | tar xz
+chmod +x indra
+sudo mv indra /usr/local/bin/
+
+# Linux x86_64
+curl -L https://github.com/moonstripe/indra_db/releases/latest/download/indra-x86_64-unknown-linux-gnu.tar.gz | tar xz
+chmod +x indra
+sudo mv indra /usr/local/bin/
+
+# Windows (PowerShell)
+# Download from releases page and add to PATH
+```
+
+Binaries are available for:
+- macOS (Intel + Apple Silicon)
+- Linux (x86_64, ARM64, ARMv7, musl variants)
+- Windows (x86_64 + ARM64)
 
 ## Quick Start
 
@@ -189,7 +214,7 @@ server.tool("search_thoughts", { query: "string", limit: "number?" }, async ({ q
 // ... more tools
 ```
 
-See [indra-mcp](https://github.com/moonstripe/indra-mcp) for a complete MCP server implementation.
+An MCP server implementation is planned as a separate npm package.
 
 ## Architecture
 
