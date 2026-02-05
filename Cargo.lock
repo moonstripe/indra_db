@@ -1470,7 +1470,7 @@ dependencies = [
 
 [[package]]
 name = "indra_db"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "bincode",
