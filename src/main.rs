@@ -21,7 +21,7 @@ use indra_db::embedding::MockEmbedder;
 #[command(version)]
 struct Cli {
     /// Path to the database file
-    #[arg(short, long, default_value = "thoughts.indra")]
+    #[arg(short, long, default_value = ".indra")]
     database: PathBuf,
 
     /// Output format (json or text)

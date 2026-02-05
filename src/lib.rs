@@ -18,7 +18,7 @@
 //! ```ignore
 //! use indra_db::Database;
 //!
-//! let mut db = Database::open_or_create("thoughts.indra")?;
+//! let mut db = Database::open_or_create(".indra")?;
 //! let thought = db.create_thought("The cat sat on the mat")?;
 //! db.commit("Initial thought")?;
 //! ```
