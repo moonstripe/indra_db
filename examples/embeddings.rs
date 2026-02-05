@@ -95,34 +95,19 @@ async fn example_hf_embedder() -> Result<()> {
     println!("Searching for 'fast compiled language'...");
     let results = db.search("fast compiled language", 3)?;
     for (i, r) in results.iter().enumerate() {
-        println!(
-            "  {}. {} (score: {:.3})",
-            i + 1,
-            r.thought.id,
-            r.score
-        );
+        println!("  {}. {} (score: {:.3})", i + 1, r.thought.id, r.score);
     }
 
     println!("\nSearching for 'web development'...");
     let results = db.search("web development", 3)?;
     for (i, r) in results.iter().enumerate() {
-        println!(
-            "  {}. {} (score: {:.3})",
-            i + 1,
-            r.thought.id,
-            r.score
-        );
+        println!("  {}. {} (score: {:.3})", i + 1, r.thought.id, r.score);
     }
 
     println!("\nSearching for 'machine learning'...");
     let results = db.search("machine learning", 3)?;
     for (i, r) in results.iter().enumerate() {
-        println!(
-            "  {}. {} (score: {:.3})",
-            i + 1,
-            r.thought.id,
-            r.score
-        );
+        println!("  {}. {} (score: {:.3})", i + 1, r.thought.id, r.score);
     }
 
     println!("\n✓ HFEmbedder understands semantic meaning!");
@@ -148,11 +133,7 @@ fn example_api_embedder() -> Result<()> {
 
     println!("Using OpenAI text-embedding-3-small (1536 dimensions)\n");
 
-    let embedder = ApiEmbedder::new(
-        ApiProvider::OpenAI,
-        "text-embedding-3-small",
-        1536,
-    )?;
+    let embedder = ApiEmbedder::new(ApiProvider::OpenAI, "text-embedding-3-small", 1536)?;
 
     let mut db = Database::open_or_create("example_api.indra")?.with_embedder(embedder);
 
@@ -180,23 +161,13 @@ fn example_api_embedder() -> Result<()> {
     println!("Searching for 'artificial intelligence'...");
     let results = db.search("artificial intelligence", 3)?;
     for (i, r) in results.iter().enumerate() {
-        println!(
-            "  {}. {} (score: {:.3})",
-            i + 1,
-            r.thought.id,
-            r.score
-        );
+        println!("  {}. {} (score: {:.3})", i + 1, r.thought.id, r.score);
     }
 
     println!("\nSearching for 'advanced computing'...");
     let results = db.search("advanced computing", 3)?;
     for (i, r) in results.iter().enumerate() {
-        println!(
-            "  {}. {} (score: {:.3})",
-            i + 1,
-            r.thought.id,
-            r.score
-        );
+        println!("  {}. {} (score: {:.3})", i + 1, r.thought.id, r.score);
     }
 
     println!("\n✓ ApiEmbedder provides production-grade embeddings");
@@ -218,11 +189,7 @@ fn example_batch_embeddings() -> Result<()> {
         return Ok(());
     }
 
-    let embedder = ApiEmbedder::new(
-        ApiProvider::OpenAI,
-        "text-embedding-3-small",
-        1536,
-    )?;
+    let embedder = ApiEmbedder::new(ApiProvider::OpenAI, "text-embedding-3-small", 1536)?;
 
     println!("Embedding 10 thoughts in a single API call...");
 
@@ -245,7 +212,10 @@ fn example_batch_embeddings() -> Result<()> {
     let duration = start.elapsed();
 
     println!("✓ Embedded {} thoughts in {:?}", embeddings.len(), duration);
-    println!("✓ Single API call instead of {} separate calls", thoughts.len());
+    println!(
+        "✓ Single API call instead of {} separate calls",
+        thoughts.len()
+    );
     println!("✓ Significant cost savings for bulk operations");
 
     Ok(())

@@ -164,10 +164,7 @@ impl HFEmbedder {
 
     /// Mean pooling implementation
     #[cfg(feature = "hf-embeddings")]
-    fn mean_pooling(
-        last_hidden_state: &Tensor,
-        attention_mask: &Tensor,
-    ) -> Result<Tensor> {
+    fn mean_pooling(last_hidden_state: &Tensor, attention_mask: &Tensor) -> Result<Tensor> {
         // Expand attention mask to match hidden state dimensions
         let expanded_mask = attention_mask
             .unsqueeze(2)
@@ -304,20 +301,81 @@ impl Embedder for HFEmbedder {
 #[cfg(all(test, feature = "hf-embeddings"))]
 mod tests {
     use super::*;
+    use crate::embedding::cosine_similarity;
+
+    /// Helper to check if we're in CI environment
+    fn is_ci() -> bool {
+        std::env::var("CI").is_ok() || std::env::var("GITHUB_ACTIONS").is_ok()
+    }
+
+    /// Helper to check if a model exists in local cache
+    fn model_exists_in_cache(model_name: &str) -> bool {
+        let cache_dir = HFEmbedder::cache_dir();
+        let model_dir_name = format!("models--{}", model_name.replace('/', "--"));
+        let model_path = cache_dir.join("hub").join(&model_dir_name);
+
+        // Check if directory exists and has actual model files
+        if !model_path.exists() {
+            return false;
+        }
+
+        // Look for snapshots directory with actual model files
+        let snapshots = model_path.join("snapshots");
+        if !snapshots.exists() {
+            return false;
+        }
+
+        // Check if any snapshot has model.safetensors or pytorch_model.bin
+        if let Ok(entries) = std::fs::read_dir(snapshots) {
+            for entry in entries.flatten() {
+                let snapshot_path = entry.path();
+                if snapshot_path.join("model.safetensors").exists()
+                    || snapshot_path.join("pytorch_model.bin").exists()
+                {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
 
     #[tokio::test]
+    async fn test_hf_cache_dir() {
+        // This test doesn't require network, always runs
+        std::env::set_var("HF_HOME", "/custom/cache");
+        assert_eq!(HFEmbedder::cache_dir(), PathBuf::from("/custom/cache"));
+        std::env::remove_var("HF_HOME");
+    }
+
+    #[tokio::test]
+    #[ignore] // Skip in CI by default, run locally with: cargo test -- --ignored
     async fn test_hf_embedder_creation() {
+        if is_ci() {
+            eprintln!("Skipping HF embedder test in CI (requires model download)");
+            return;
+        }
+
         // This test requires network access and will download the model
         let embedder = HFEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")
             .await
             .unwrap();
 
         assert_eq!(embedder.dimension(), 384);
-        assert_eq!(embedder.model_name(), "sentence-transformers/all-MiniLM-L6-v2");
+        assert_eq!(
+            embedder.model_name(),
+            "sentence-transformers/all-MiniLM-L6-v2"
+        );
     }
 
     #[tokio::test]
+    #[ignore] // Skip in CI by default
     async fn test_hf_embedder_embed() {
+        if is_ci() {
+            eprintln!("Skipping HF embedder test in CI");
+            return;
+        }
+
         let embedder = HFEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")
             .await
             .unwrap();
@@ -331,7 +389,13 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore] // Skip in CI by default
     async fn test_hf_embedder_deterministic() {
+        if is_ci() {
+            eprintln!("Skipping HF embedder test in CI");
+            return;
+        }
+
         let embedder = HFEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")
             .await
             .unwrap();
@@ -346,9 +410,63 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_hf_cache_dir() {
-        std::env::set_var("HF_HOME", "/custom/cache");
-        assert_eq!(HFEmbedder::cache_dir(), PathBuf::from("/custom/cache"));
-        std::env::remove_var("HF_HOME");
+    #[ignore] // Skip in CI, only run locally if model is cached
+    async fn test_hf_embedder_semantic_similarity() {
+        // Only run if model is in cache (won't download in tests)
+        if is_ci() || !model_exists_in_cache("sentence-transformers/all-MiniLM-L6-v2") {
+            eprintln!("Skipping semantic similarity test (model not in cache)");
+            return;
+        }
+
+        let embedder = HFEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")
+            .await
+            .unwrap();
+
+        // Similar sentences should have high similarity
+        let e1 = embedder.embed("The cat sits on the mat").unwrap();
+        let e2 = embedder.embed("A cat is sitting on a mat").unwrap();
+        let e3 = embedder.embed("Dogs are loyal animals").unwrap();
+
+        let sim_cat = cosine_similarity(&e1, &e2);
+        let sim_dog = cosine_similarity(&e1, &e3);
+
+        // Cat sentences should be more similar to each other than to dog sentence
+        assert!(sim_cat > sim_dog);
+        assert!(sim_cat > 0.7); // High similarity threshold
+        println!(
+            "Cat similarity: {:.3}, Dog similarity: {:.3}",
+            sim_cat, sim_dog
+        );
     }
+
+    #[tokio::test]
+    #[ignore] // Skip in CI
+    async fn test_hf_embedder_batch() {
+        if is_ci() || !model_exists_in_cache("sentence-transformers/all-MiniLM-L6-v2") {
+            eprintln!("Skipping batch test (model not in cache)");
+            return;
+        }
+
+        let embedder = HFEmbedder::new("sentence-transformers/all-MiniLM-L6-v2")
+            .await
+            .unwrap();
+
+        let texts = vec!["first text", "second text", "third text"];
+        let embeddings = embedder.embed_batch(&texts).unwrap();
+
+        assert_eq!(embeddings.len(), 3);
+        for embedding in embeddings {
+            assert_eq!(embedding.len(), 384);
+
+            // Check normalized
+            let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+            assert!((norm - 1.0).abs() < 1e-4);
+        }
+    }
+
+    // NOTE: embeddinggemma tests would go here, but the model appears incomplete in cache
+    // The google/embeddinggemma-300m model uses a different architecture (Gemma)
+    // and is not BERT-compatible, so it would require a separate implementation.
+    //
+    // For now, we focus on sentence-transformers models which are well-supported.
 }
