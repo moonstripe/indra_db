@@ -486,3 +486,156 @@ fn test_cli_very_long_content() {
     assert!(success, "long content should be handled");
     assert!(stdout.contains("\"status\":\"ok\""));
 }
+
+// ============================================================================
+// Remote Management Tests
+// ============================================================================
+
+#[test]
+fn test_cli_remote_add_and_list() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join(".indra");
+    let db_str = db_path.to_str().unwrap();
+
+    run_indra(&["init"], db_str);
+
+    // Add a remote
+    let (stdout, _stderr, success) = run_indra(&["remote", "add", "origin", "user/repo"], db_str);
+    assert!(success, "remote add should succeed");
+    assert!(stdout.contains("\"status\":\"ok\""));
+
+    // List remotes
+    let (stdout, _stderr, success) = run_indra(&["remote", "list"], db_str);
+    assert!(success, "remote list should succeed");
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["count"], 1);
+    assert_eq!(json["default"], "origin");
+    assert_eq!(json["remotes"][0]["name"], "origin");
+    assert_eq!(json["remotes"][0]["url"], "user/repo");
+}
+
+#[test]
+fn test_cli_remote_show() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join(".indra");
+    let db_str = db_path.to_str().unwrap();
+
+    run_indra(&["init"], db_str);
+    run_indra(&["remote", "add", "origin", "kojinglick/my-db"], db_str);
+
+    let (stdout, _stderr, success) = run_indra(&["remote", "show", "origin"], db_str);
+    assert!(success, "remote show should succeed");
+
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["name"], "origin");
+    assert_eq!(json["url"], "kojinglick/my-db");
+    assert_eq!(json["owner"], "kojinglick");
+    assert_eq!(json["repo"], "my-db");
+}
+
+#[test]
+fn test_cli_remote_set_url() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join(".indra");
+    let db_str = db_path.to_str().unwrap();
+
+    run_indra(&["init"], db_str);
+    run_indra(&["remote", "add", "origin", "user/old-repo"], db_str);
+
+    // Update URL
+    let (stdout, _stderr, success) =
+        run_indra(&["remote", "set-url", "origin", "user/new-repo"], db_str);
+    assert!(success, "remote set-url should succeed");
+    assert!(stdout.contains("\"status\":\"ok\""));
+
+    // Verify change
+    let (stdout, _stderr, success) = run_indra(&["remote", "show", "origin"], db_str);
+    assert!(success);
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["url"], "user/new-repo");
+}
+
+#[test]
+fn test_cli_remote_remove() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join(".indra");
+    let db_str = db_path.to_str().unwrap();
+
+    run_indra(&["init"], db_str);
+    run_indra(&["remote", "add", "origin", "user/repo"], db_str);
+    run_indra(&["remote", "add", "upstream", "other/repo"], db_str);
+
+    // Remove origin
+    let (stdout, _stderr, success) = run_indra(&["remote", "remove", "origin"], db_str);
+    assert!(success, "remote remove should succeed");
+    assert!(stdout.contains("\"status\":\"ok\""));
+
+    // Verify removal
+    let (stdout, _stderr, success) = run_indra(&["remote", "list"], db_str);
+    assert!(success);
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["count"], 1);
+    assert_eq!(json["remotes"][0]["name"], "upstream");
+}
+
+#[test]
+fn test_cli_remote_duplicate_error() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join(".indra");
+    let db_str = db_path.to_str().unwrap();
+
+    run_indra(&["init"], db_str);
+    run_indra(&["remote", "add", "origin", "user/repo"], db_str);
+
+    // Try to add duplicate
+    let (_stdout, _stderr, success) = run_indra(&["remote", "add", "origin", "other/repo"], db_str);
+    assert!(!success, "adding duplicate remote should fail");
+}
+
+#[test]
+fn test_cli_push_requires_remote() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join(".indra");
+    let db_str = db_path.to_str().unwrap();
+
+    run_indra(&["init"], db_str);
+
+    // Push without remote should fail
+    let (_stdout, _stderr, success) = run_indra(&["push"], db_str);
+    assert!(!success, "push without remote should fail");
+}
+
+#[test]
+fn test_cli_push_with_remote() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join(".indra");
+    let db_str = db_path.to_str().unwrap();
+
+    run_indra(&["init"], db_str);
+    run_indra(&["remote", "add", "origin", "user/repo"], db_str);
+    run_indra(&["create", "test thought"], db_str);
+
+    // Push should succeed (returns pending status since no API)
+    let (stdout, _stderr, success) = run_indra(&["push"], db_str);
+    assert!(success, "push should succeed");
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["status"], "pending");
+    assert_eq!(json["remote"], "origin");
+}
+
+#[test]
+fn test_cli_status_shows_remotes() {
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join(".indra");
+    let db_str = db_path.to_str().unwrap();
+
+    run_indra(&["init"], db_str);
+    run_indra(&["remote", "add", "origin", "user/repo"], db_str);
+
+    let (stdout, _stderr, success) = run_indra(&["status"], db_str);
+    assert!(success, "status should succeed");
+
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["remotes"].as_array().unwrap().len(), 1);
+    assert_eq!(json["remotes"][0]["name"], "origin");
+}

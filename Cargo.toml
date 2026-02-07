@@ -54,7 +54,16 @@ candle-transformers = { version = "0.8", optional = true }
 hf-hub = { version = "0.4", optional = true, features = ["tokio"] }
 tokenizers = { version = "0.21", optional = true }
 tokio = { version = "1.42", optional = true, features = ["full"] }
-reqwest = { version = "0.12", optional = true, features = ["json"] }
+reqwest = { version = "0.12", optional = true, features = ["json", "blocking"] }
+
+# Directories for config storage
+dirs = "5.0"
+
+# Open browser for login
+open = "5.0"
+linfa = { version = "0.8.1", optional = true }
+linfa-reduction = { version = "0.8.1", optional = true }
+ndarray = { version = "0.16", optional = true }
 
 [dev-dependencies]
 tempfile = "3.10"
@@ -65,6 +74,13 @@ lto = true
 codegen-units = 1
 
 [features]
-default = []
+default = ["hf-embeddings", "sync", "viz"]
 hf-embeddings = ["candle-core", "candle-nn", "candle-transformers", "hf-hub", "tokenizers", "tokio"]
 api-embeddings = ["reqwest", "tokio"]
+sync = ["reqwest", "tokio"]
+viz = ["linfa", "linfa-reduction", "ndarray"]
+linfa = ["dep:linfa"]
+linfa-reduction = ["dep:linfa-reduction"]
+ndarray = ["dep:ndarray"]
+# For testing without heavy deps
+mock-embeddings = []

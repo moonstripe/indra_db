@@ -27,9 +27,11 @@ pub mod embedding;
 pub mod graph;
 pub mod model;
 pub mod ops;
+pub mod remote;
 pub mod search;
 pub mod store;
 pub mod trie;
+pub mod viz;
 
 mod database;
 mod error;
@@ -39,8 +41,15 @@ pub use embedding::{Embedder, MockEmbedder};
 pub use error::{Error, Result};
 pub use graph::TraversalDirection;
 pub use model::{Commit, Edge, EdgeType, Hash, Thought, ThoughtId};
+pub use remote::{Remote, RemoteConfig, SyncClient, SyncConfig, SyncState, PullResult, Auth, CredentialStore, Credentials, UserInfo, DEFAULT_API_URL};
+#[cfg(feature = "sync")]
+pub use remote::refresh_access_token;
 pub use search::SearchResult;
 pub use store::ObjectStore;
+pub use viz::{VizExport, VizMeta, VizThought};
+
+#[cfg(feature = "viz")]
+pub use viz::project_to_3d;
 
 /// Database version for format compatibility
 pub const VERSION: u32 = 1;

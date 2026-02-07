@@ -188,6 +188,103 @@ enum Commands {
 
     /// Show database status
     Status,
+
+    // === Remote Commands ===
+    /// Manage remote repositories
+    #[command(subcommand)]
+    Remote(RemoteCommands),
+
+    /// Push to a remote repository
+    Push {
+        /// Remote name (default: origin)
+        #[arg(default_value = "origin")]
+        remote: String,
+        /// Force push even if remote is ahead
+        #[arg(short, long)]
+        force: bool,
+        /// Also push visualization data (computed via PCA)
+        #[arg(long)]
+        viz: bool,
+    },
+
+    /// Pull from a remote repository
+    Pull {
+        /// Remote name (default: origin)
+        #[arg(default_value = "origin")]
+        remote: String,
+        /// Force pull even if there are conflicts (discards local changes)
+        #[arg(short, long)]
+        force: bool,
+    },
+
+    /// Check sync status with remote
+    SyncStatus {
+        /// Remote name (default: origin)
+        #[arg(default_value = "origin")]
+        remote: String,
+    },
+
+    /// Clone a remote repository
+    Clone {
+        /// Remote URL (e.g., username/repo or full URL)
+        url: String,
+        /// Local path (default: repo name)
+        #[arg(short, long)]
+        path: Option<PathBuf>,
+    },
+
+    /// Login to IndraNet (opens browser for GitHub OAuth)
+    Login,
+
+    /// Logout from IndraNet (removes stored credentials)
+    Logout,
+
+    /// Show current authentication status
+    Whoami,
+
+    /// Export database in various formats
+    Export {
+        /// Export format: viz-json (3D visualization data)
+        #[arg(short, long, default_value = "viz-json")]
+        format: String,
+        /// Output file (default: stdout)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum RemoteCommands {
+    /// Add a new remote
+    Add {
+        /// Name for the remote (e.g., origin)
+        name: String,
+        /// URL of the remote (e.g., username/repo or https://indra.dev/username/repo)
+        url: String,
+    },
+
+    /// Remove a remote
+    Remove {
+        /// Name of the remote to remove
+        name: String,
+    },
+
+    /// List all remotes
+    List,
+
+    /// Show details of a remote
+    Show {
+        /// Name of the remote
+        name: String,
+    },
+
+    /// Set the URL of an existing remote
+    SetUrl {
+        /// Name of the remote
+        name: String,
+        /// New URL
+        url: String,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -648,14 +745,958 @@ fn main() -> anyhow::Result<()> {
                 cli.model.clone(),
                 cli.dimension,
             )?;
+
+            // Load remote config for status display
+            let remote_config = indra_db::RemoteConfig::load(&cli.database).unwrap_or_default();
+            let remotes: Vec<_> = remote_config
+                .list()
+                .iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "name": r.name,
+                        "url": r.url
+                    })
+                })
+                .collect();
+
             output(
                 &cli.format,
                 &serde_json::json!({
                     "database": cli.database.display().to_string(),
                     "branch": db.current_branch(),
-                    "dirty": db.is_dirty()
+                    "dirty": db.is_dirty(),
+                    "remotes": remotes
                 }),
             );
+        }
+
+        // === Remote Commands ===
+        Commands::Remote(remote_cmd) => {
+            let mut remote_config = indra_db::RemoteConfig::load(&cli.database)?;
+
+            match remote_cmd {
+                RemoteCommands::Add { name, url } => {
+                    remote_config.add(&name, &url)?;
+                    remote_config.save(&cli.database)?;
+                    output(
+                        &cli.format,
+                        &serde_json::json!({
+                            "status": "ok",
+                            "message": format!("Added remote '{}' -> {}", name, url)
+                        }),
+                    );
+                }
+
+                RemoteCommands::Remove { name } => {
+                    remote_config.remove(&name)?;
+                    remote_config.save(&cli.database)?;
+                    output(
+                        &cli.format,
+                        &serde_json::json!({
+                            "status": "ok",
+                            "message": format!("Removed remote '{}'", name)
+                        }),
+                    );
+                }
+
+                RemoteCommands::List => {
+                    let remotes: Vec<_> = remote_config
+                        .list()
+                        .iter()
+                        .map(|r| {
+                            serde_json::json!({
+                                "name": r.name,
+                                "url": r.url,
+                                "last_sync": r.last_sync,
+                                "last_known_head": r.last_known_head
+                            })
+                        })
+                        .collect();
+                    output(
+                        &cli.format,
+                        &serde_json::json!({
+                            "count": remotes.len(),
+                            "default": remote_config.default_remote,
+                            "remotes": remotes
+                        }),
+                    );
+                }
+
+                RemoteCommands::Show { name } => {
+                    let remote = remote_config
+                        .get(&name)
+                        .ok_or_else(|| anyhow::anyhow!("Remote '{}' not found", name))?;
+                    let parsed = remote.parse_url();
+                    output(
+                        &cli.format,
+                        &serde_json::json!({
+                            "name": remote.name,
+                            "url": remote.url,
+                            "owner": parsed.as_ref().map(|(o, _)| o),
+                            "repo": parsed.as_ref().map(|(_, r)| r),
+                            "last_sync": remote.last_sync,
+                            "last_known_head": remote.last_known_head
+                        }),
+                    );
+                }
+
+                RemoteCommands::SetUrl { name, url } => {
+                    remote_config.set_url(&name, &url)?;
+                    remote_config.save(&cli.database)?;
+                    output(
+                        &cli.format,
+                        &serde_json::json!({
+                            "status": "ok",
+                            "message": format!("Updated URL for remote '{}' -> {}", name, url)
+                        }),
+                    );
+                }
+            }
+        }
+
+        Commands::Push { remote, force, viz } => {
+            let mut remote_config = indra_db::RemoteConfig::load(&cli.database)?;
+            let remote_info = remote_config
+                .get(&remote)
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Remote '{}' not found. Add it with: indra remote add {} <url>",
+                        remote,
+                        remote
+                    )
+                })?
+                .clone();
+
+            // Get local head for reporting
+            let db = open_db(
+                &cli.database,
+                &cli.embedder,
+                cli.model.clone(),
+                cli.dimension,
+            )?;
+
+            let log = db.log(Some(1))?;
+            let head_hash = log.first().map(|(h, _)| h.to_hex()).unwrap_or_default();
+
+            // Generate viz data if requested
+            #[cfg(feature = "viz")]
+            let viz_export = if viz {
+                let thoughts = db.list_thoughts()?;
+                Some(indra_db::project_to_3d(&thoughts)?)
+            } else {
+                None
+            };
+            #[cfg(not(feature = "viz"))]
+            let viz_export: Option<()> = None;
+
+            drop(db); // Close database before push
+
+            // Create sync client and push
+            #[cfg(feature = "sync")]
+            {
+                let sync_config = indra_db::SyncConfig::from_env();
+                let client = indra_db::SyncClient::new(sync_config.clone())?;
+
+                match client.push(&cli.database, &remote_info, force) {
+                    Ok(result) => {
+                        if result.success {
+                            // Update last_sync time
+                            remote_config.update_last_sync(&remote)?;
+                            remote_config.save(&cli.database)?;
+
+                            // Push viz data if we have it
+                            #[cfg(feature = "viz")]
+                            let viz_pushed = if let Some(ref viz_data) = viz_export {
+                                match client.get_base(&remote_info) {
+                                    Ok(Some(base_id)) => {
+                                        let viz_url = format!(
+                                            "{}/bases/{}/viz",
+                                            sync_config.api_url.trim_end_matches('/'),
+                                            base_id
+                                        );
+                                        let viz_client = reqwest::blocking::Client::new();
+                                        let mut viz_request = viz_client
+                                            .post(&viz_url)
+                                            .header("Content-Type", "application/json");
+
+                                        if let indra_db::Auth::ApiKey(ref key) = sync_config.auth {
+                                            viz_request = viz_request
+                                                .header("Authorization", format!("Bearer {}", key));
+                                        }
+
+                                        match viz_request.json(viz_data).send() {
+                                            Ok(resp) if resp.status().is_success() => true,
+                                            Ok(resp) => {
+                                                eprintln!(
+                                                    "Viz push failed: {} - {}",
+                                                    resp.status(),
+                                                    resp.text().unwrap_or_default()
+                                                );
+                                                false
+                                            }
+                                            Err(e) => {
+                                                eprintln!("Viz push error: {}", e);
+                                                false
+                                            }
+                                        }
+                                    }
+                                    Ok(None) => {
+                                        eprintln!("Viz push skipped: base not found");
+                                        false
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Viz push error getting base: {}", e);
+                                        false
+                                    }
+                                }
+                            } else {
+                                false
+                            };
+
+                            #[cfg(not(feature = "viz"))]
+                            let viz_pushed = false;
+
+                            output(
+                                &cli.format,
+                                &serde_json::json!({
+                                    "status": "ok",
+                                    "message": "Push completed successfully",
+                                    "remote": remote_info.name,
+                                    "url": remote_info.url,
+                                    "local_head": head_hash,
+                                    "size_bytes": result.size_bytes,
+                                    "viz_pushed": viz_pushed
+                                }),
+                            );
+                        } else {
+                            output(
+                                &cli.format,
+                                &serde_json::json!({
+                                    "status": "error",
+                                    "message": result.error.unwrap_or_else(|| "Push failed".to_string()),
+                                    "remote": remote_info.name,
+                                    "url": remote_info.url
+                                }),
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        output(
+                            &cli.format,
+                            &serde_json::json!({
+                                "status": "error",
+                                "message": format!("Push failed: {}", e),
+                                "remote": remote_info.name,
+                                "url": remote_info.url
+                            }),
+                        );
+                    }
+                }
+            }
+
+            #[cfg(not(feature = "sync"))]
+            {
+                let _ = viz_export; // Suppress warning
+                output(
+                    &cli.format,
+                    &serde_json::json!({
+                        "status": "error",
+                        "message": "Sync feature not enabled. Rebuild with --features sync",
+                        "remote": remote_info.name,
+                        "url": remote_info.url,
+                        "local_head": head_hash
+                    }),
+                );
+            }
+        }
+
+        Commands::Pull { remote, force } => {
+            let mut remote_config = indra_db::RemoteConfig::load(&cli.database)?;
+            let remote_info = remote_config
+                .get(&remote)
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Remote '{}' not found. Add it with: indra remote add {} <url>",
+                        remote,
+                        remote
+                    )
+                })?
+                .clone();
+
+            #[cfg(feature = "sync")]
+            {
+                let sync_config = indra_db::SyncConfig::from_env();
+                let client = indra_db::SyncClient::new(sync_config)?;
+
+                match client.pull_smart(&cli.database, &remote_info, force) {
+                    Ok(result) => {
+                        match result {
+                            indra_db::PullResult::AlreadyUpToDate => {
+                                output(
+                                    &cli.format,
+                                    &serde_json::json!({
+                                        "status": "ok",
+                                        "message": "Already up to date",
+                                        "remote": remote_info.name,
+                                        "url": remote_info.url
+                                    }),
+                                );
+                            }
+                            indra_db::PullResult::Updated { size_bytes } => {
+                                // Update last_sync time
+                                remote_config.update_last_sync(&remote)?;
+                                remote_config.save(&cli.database)?;
+
+                                output(
+                                    &cli.format,
+                                    &serde_json::json!({
+                                        "status": "ok",
+                                        "message": "Pull completed successfully",
+                                        "remote": remote_info.name,
+                                        "url": remote_info.url,
+                                        "size_bytes": size_bytes
+                                    }),
+                                );
+                            }
+                            indra_db::PullResult::LocalAhead => {
+                                output(
+                                    &cli.format,
+                                    &serde_json::json!({
+                                        "status": "ok",
+                                        "message": "Local is ahead of remote. Nothing to pull.",
+                                        "remote": remote_info.name,
+                                        "url": remote_info.url
+                                    }),
+                                );
+                            }
+                            indra_db::PullResult::RemoteEmpty => {
+                                output(
+                                    &cli.format,
+                                    &serde_json::json!({
+                                        "status": "ok",
+                                        "message": "Remote is empty. Nothing to pull.",
+                                        "remote": remote_info.name,
+                                        "url": remote_info.url
+                                    }),
+                                );
+                            }
+                            indra_db::PullResult::Conflict {
+                                local_head,
+                                remote_head,
+                            } => {
+                                output(
+                                    &cli.format,
+                                    &serde_json::json!({
+                                        "status": "conflict",
+                                        "message": "Local and remote have diverged. Use --force to discard local changes.",
+                                        "remote": remote_info.name,
+                                        "url": remote_info.url,
+                                        "local_head": local_head,
+                                        "remote_head": remote_head
+                                    }),
+                                );
+                            }
+                            indra_db::PullResult::ForcePulled {
+                                size_bytes,
+                                discarded_head,
+                            } => {
+                                remote_config.update_last_sync(&remote)?;
+                                remote_config.save(&cli.database)?;
+
+                                output(
+                                    &cli.format,
+                                    &serde_json::json!({
+                                        "status": "ok",
+                                        "message": "Force pulled, discarding local changes",
+                                        "remote": remote_info.name,
+                                        "url": remote_info.url,
+                                        "size_bytes": size_bytes,
+                                        "discarded_head": discarded_head
+                                    }),
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        output(
+                            &cli.format,
+                            &serde_json::json!({
+                                "status": "error",
+                                "message": format!("Pull failed: {}", e),
+                                "remote": remote_info.name,
+                                "url": remote_info.url
+                            }),
+                        );
+                    }
+                }
+            }
+
+            #[cfg(not(feature = "sync"))]
+            {
+                let _ = force; // Suppress unused warning
+                output(
+                    &cli.format,
+                    &serde_json::json!({
+                        "status": "error",
+                        "message": "Sync feature not enabled. Rebuild with --features sync",
+                        "remote": remote_info.name,
+                        "url": remote_info.url
+                    }),
+                );
+            }
+        }
+
+        Commands::SyncStatus { remote } => {
+            let remote_config = indra_db::RemoteConfig::load(&cli.database)?;
+            let remote_info = remote_config
+                .get(&remote)
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Remote '{}' not found. Add it with: indra remote add {} <url>",
+                        remote,
+                        remote
+                    )
+                })?
+                .clone();
+
+            #[cfg(feature = "sync")]
+            {
+                let sync_config = indra_db::SyncConfig::from_env();
+                let client = indra_db::SyncClient::new(sync_config)?;
+
+                match client.compare(&cli.database, &remote_info) {
+                    Ok(state) => {
+                        let (status, message) = match &state {
+                            indra_db::SyncState::InSync => {
+                                ("in_sync", "Local and remote are in sync".to_string())
+                            }
+                            indra_db::SyncState::LocalAhead {
+                                local_head,
+                                remote_head,
+                            } => (
+                                "local_ahead",
+                                format!(
+                                    "Local is ahead. Local: {}, Remote: {:?}",
+                                    local_head, remote_head
+                                ),
+                            ),
+                            indra_db::SyncState::RemoteAhead {
+                                local_head,
+                                remote_head,
+                            } => (
+                                "remote_ahead",
+                                format!(
+                                    "Remote is ahead. Local: {:?}, Remote: {}",
+                                    local_head, remote_head
+                                ),
+                            ),
+                            indra_db::SyncState::Diverged {
+                                local_head,
+                                remote_head,
+                            } => (
+                                "diverged",
+                                format!(
+                                    "Local and remote have diverged. Local: {}, Remote: {}",
+                                    local_head, remote_head
+                                ),
+                            ),
+                            indra_db::SyncState::RemoteEmpty => (
+                                "remote_empty",
+                                "Remote doesn't exist or is empty".to_string(),
+                            ),
+                            indra_db::SyncState::LocalEmpty { remote_head } => (
+                                "local_empty",
+                                format!("Local is empty. Remote head: {}", remote_head),
+                            ),
+                            indra_db::SyncState::Unknown { reason } => {
+                                ("unknown", format!("Could not determine state: {}", reason))
+                            }
+                        };
+
+                        output(
+                            &cli.format,
+                            &serde_json::json!({
+                                "status": status,
+                                "message": message,
+                                "remote": remote_info.name,
+                                "url": remote_info.url,
+                                "can_push": state.can_push(),
+                                "can_pull": state.can_pull(),
+                                "has_conflict": state.has_conflict()
+                            }),
+                        );
+                    }
+                    Err(e) => {
+                        output(
+                            &cli.format,
+                            &serde_json::json!({
+                                "status": "error",
+                                "message": format!("Failed to check sync status: {}", e),
+                                "remote": remote_info.name,
+                                "url": remote_info.url
+                            }),
+                        );
+                    }
+                }
+            }
+
+            #[cfg(not(feature = "sync"))]
+            {
+                output(
+                    &cli.format,
+                    &serde_json::json!({
+                        "status": "error",
+                        "message": "Sync feature not enabled. Rebuild with --features sync",
+                        "remote": remote_info.name,
+                        "url": remote_info.url
+                    }),
+                );
+            }
+        }
+
+        Commands::Clone { url, path } => {
+            // Determine local path from URL if not specified
+            let local_path = path.unwrap_or_else(|| {
+                let remote = indra_db::Remote::new("origin", &url);
+                if let Some((_, repo)) = remote.parse_url() {
+                    PathBuf::from(format!("{}.indra", repo))
+                } else {
+                    PathBuf::from(".indra")
+                }
+            });
+
+            // Check if local path already exists
+            if local_path.exists() {
+                output(
+                    &cli.format,
+                    &serde_json::json!({
+                        "status": "error",
+                        "message": format!("Path already exists: {}", local_path.display()),
+                        "url": url,
+                        "local_path": local_path.display().to_string()
+                    }),
+                );
+                return Ok(());
+            }
+
+            #[cfg(feature = "sync")]
+            {
+                let remote = indra_db::Remote::new("origin", &url);
+                let sync_config = indra_db::SyncConfig::from_env();
+                let client = indra_db::SyncClient::new(sync_config)?;
+
+                match client.pull(&local_path, &remote) {
+                    Ok(size_bytes) => {
+                        // Set up origin remote in the new database
+                        let mut remote_config = indra_db::RemoteConfig::load(&local_path)?;
+                        remote_config.add("origin".to_string(), url.clone())?;
+                        remote_config.set_default("origin");
+                        remote_config.update_last_sync("origin")?;
+                        remote_config.save(&local_path)?;
+
+                        output(
+                            &cli.format,
+                            &serde_json::json!({
+                                "status": "ok",
+                                "message": "Clone completed successfully",
+                                "url": url,
+                                "local_path": local_path.display().to_string(),
+                                "size_bytes": size_bytes
+                            }),
+                        );
+                    }
+                    Err(e) => {
+                        // Clean up partial file if it exists
+                        let _ = std::fs::remove_file(&local_path);
+
+                        output(
+                            &cli.format,
+                            &serde_json::json!({
+                                "status": "error",
+                                "message": format!("Clone failed: {}", e),
+                                "url": url,
+                                "local_path": local_path.display().to_string()
+                            }),
+                        );
+                    }
+                }
+            }
+
+            #[cfg(not(feature = "sync"))]
+            {
+                output(
+                    &cli.format,
+                    &serde_json::json!({
+                        "status": "error",
+                        "message": "Sync feature not enabled. Rebuild with --features sync",
+                        "url": url,
+                        "local_path": local_path.display().to_string()
+                    }),
+                );
+            }
+        }
+
+        Commands::Login => {
+            #[cfg(feature = "sync")]
+            {
+                let api_url = std::env::var("INDRA_API_URL")
+                    .unwrap_or_else(|_| indra_db::DEFAULT_API_URL.to_string());
+
+                // Get login URL from API
+                let client = reqwest::blocking::Client::new();
+                let resp = client
+                    .get(format!("{}/auth/cli/start", api_url))
+                    .send()
+                    .map_err(|e| anyhow::anyhow!("Failed to start login: {}", e))?;
+
+                if !resp.status().is_success() {
+                    output(
+                        &cli.format,
+                        &serde_json::json!({
+                            "status": "error",
+                            "message": "Failed to start login flow"
+                        }),
+                    );
+                    return Ok(());
+                }
+
+                #[derive(serde::Deserialize)]
+                struct LoginStart {
+                    url: String,
+                    state: String,
+                    poll_url: String,
+                }
+
+                let login_data: LoginStart = resp
+                    .json()
+                    .map_err(|e| anyhow::anyhow!("Invalid response: {}", e))?;
+
+                // Open browser
+                eprintln!("Opening browser for authentication...");
+                if let Err(e) = open::that(&login_data.url) {
+                    eprintln!("Failed to open browser: {}", e);
+                    eprintln!("Please open this URL manually:");
+                    eprintln!("{}", login_data.url);
+                }
+
+                // Poll for completion
+                eprintln!("Waiting for authentication...");
+
+                #[derive(serde::Deserialize)]
+                struct PollResponse {
+                    status: String,
+                    access_token: Option<String>,
+                    refresh_token: Option<String>,
+                    expires_in: Option<u64>,
+                    user: Option<indra_db::UserInfo>,
+                }
+
+                let mut attempts = 0;
+                let max_attempts = 60; // 2 minutes with 2s intervals
+
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    attempts += 1;
+
+                    if attempts > max_attempts {
+                        output(
+                            &cli.format,
+                            &serde_json::json!({
+                                "status": "error",
+                                "message": "Login timed out. Please try again."
+                            }),
+                        );
+                        return Ok(());
+                    }
+
+                    let poll_resp = client.get(&login_data.poll_url).send();
+
+                    match poll_resp {
+                        Ok(resp) if resp.status().is_success() => {
+                            let poll_data: PollResponse = resp
+                                .json()
+                                .map_err(|e| anyhow::anyhow!("Invalid poll response: {}", e))?;
+
+                            match poll_data.status.as_str() {
+                                "pending" => continue,
+                                "complete" => {
+                                    // Save credentials
+                                    let store = indra_db::CredentialStore::new()?;
+
+                                    let now = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap()
+                                        .as_secs();
+
+                                    let creds = indra_db::Credentials {
+                                        api_url: api_url.clone(),
+                                        access_token: poll_data.access_token.unwrap_or_default(),
+                                        refresh_token: poll_data.refresh_token.unwrap_or_default(),
+                                        expires_at: now + poll_data.expires_in.unwrap_or(3600),
+                                        user: poll_data.user,
+                                    };
+
+                                    store.save(creds.clone())?;
+
+                                    let user_name = creds
+                                        .user
+                                        .as_ref()
+                                        .map(|u| u.name.clone())
+                                        .unwrap_or_else(|| "Unknown".to_string());
+
+                                    output(
+                                        &cli.format,
+                                        &serde_json::json!({
+                                            "status": "ok",
+                                            "message": format!("Logged in as {}", user_name),
+                                            "credentials_path": store.path().display().to_string()
+                                        }),
+                                    );
+                                    return Ok(());
+                                }
+                                _ => {
+                                    output(
+                                        &cli.format,
+                                        &serde_json::json!({
+                                            "status": "error",
+                                            "message": "Authentication failed"
+                                        }),
+                                    );
+                                    return Ok(());
+                                }
+                            }
+                        }
+                        Ok(resp) if resp.status().as_u16() == 404 => {
+                            output(
+                                &cli.format,
+                                &serde_json::json!({
+                                    "status": "error",
+                                    "message": "Login session expired. Please try again."
+                                }),
+                            );
+                            return Ok(());
+                        }
+                        _ => continue,
+                    }
+                }
+            }
+
+            #[cfg(not(feature = "sync"))]
+            {
+                output(
+                    &cli.format,
+                    &serde_json::json!({
+                        "status": "error",
+                        "message": "Sync feature not enabled. Rebuild with --features sync"
+                    }),
+                );
+            }
+        }
+
+        Commands::Logout => {
+            #[cfg(feature = "sync")]
+            {
+                let api_url = std::env::var("INDRA_API_URL")
+                    .unwrap_or_else(|_| indra_db::DEFAULT_API_URL.to_string());
+
+                // Remove stored credentials
+                if let Ok(store) = indra_db::CredentialStore::new() {
+                    if store.remove(&api_url).is_ok() {
+                        output(
+                            &cli.format,
+                            &serde_json::json!({
+                                "status": "ok",
+                                "message": "Logged out successfully",
+                                "api_url": api_url
+                            }),
+                        );
+                        return Ok(());
+                    }
+                }
+
+                output(
+                    &cli.format,
+                    &serde_json::json!({
+                        "status": "ok",
+                        "message": "No stored credentials found",
+                        "note": "If using INDRA_API_KEY, unset it: unset INDRA_API_KEY"
+                    }),
+                );
+            }
+
+            #[cfg(not(feature = "sync"))]
+            {
+                output(
+                    &cli.format,
+                    &serde_json::json!({
+                        "status": "error",
+                        "message": "Sync feature not enabled"
+                    }),
+                );
+            }
+        }
+
+        Commands::Whoami => {
+            #[cfg(feature = "sync")]
+            {
+                let api_url = std::env::var("INDRA_API_URL")
+                    .unwrap_or_else(|_| indra_db::DEFAULT_API_URL.to_string());
+
+                // Check for stored credentials first
+                if let Ok(store) = indra_db::CredentialStore::new() {
+                    if let Ok(Some(creds)) = store.load(&api_url) {
+                        if let Some(ref user) = creds.user {
+                            output(
+                                &cli.format,
+                                &serde_json::json!({
+                                    "status": "ok",
+                                    "authenticated": true,
+                                    "user": {
+                                        "id": user.id,
+                                        "name": user.name,
+                                        "github_username": user.github_username
+                                    },
+                                    "api_url": api_url,
+                                    "token_expires_at": creds.expires_at,
+                                    "token_expired": creds.is_expired()
+                                }),
+                            );
+                            return Ok(());
+                        }
+                    }
+                }
+
+                // Check for legacy API key
+                if let Ok(key) = std::env::var("INDRA_API_KEY") {
+                    let client = reqwest::blocking::Client::new();
+                    let resp = client
+                        .get(format!("{}/auth/me", api_url))
+                        .header("Authorization", format!("Bearer {}", key))
+                        .send();
+
+                    match resp {
+                        Ok(r) if r.status().is_success() => {
+                            let data: serde_json::Value = r.json().unwrap_or_default();
+                            if let Some(user) = data.get("user") {
+                                output(
+                                    &cli.format,
+                                    &serde_json::json!({
+                                        "status": "ok",
+                                        "authenticated": true,
+                                        "auth_method": "api_key",
+                                        "user": user
+                                    }),
+                                );
+                            } else {
+                                output(
+                                    &cli.format,
+                                    &serde_json::json!({
+                                        "status": "ok",
+                                        "authenticated": true,
+                                        "auth_method": "api_key",
+                                        "message": "Authenticated via API key"
+                                    }),
+                                );
+                            }
+                        }
+                        _ => {
+                            output(
+                                &cli.format,
+                                &serde_json::json!({
+                                    "status": "ok",
+                                    "authenticated": true,
+                                    "auth_method": "api_key",
+                                    "message": "API key set but could not verify with server"
+                                }),
+                            );
+                        }
+                    }
+                    return Ok(());
+                }
+
+                output(
+                    &cli.format,
+                    &serde_json::json!({
+                        "status": "ok",
+                        "authenticated": false,
+                        "message": "Not logged in. Run 'indra login' to authenticate.",
+                        "api_url": api_url
+                    }),
+                );
+            }
+
+            #[cfg(not(feature = "sync"))]
+            {
+                output(
+                    &cli.format,
+                    &serde_json::json!({
+                        "status": "error",
+                        "message": "Sync feature not enabled"
+                    }),
+                );
+            }
+        }
+
+        Commands::Export {
+            format,
+            output: output_path,
+        } => {
+            match format.as_str() {
+                "viz-json" => {
+                    #[cfg(feature = "viz")]
+                    {
+                        let db = open_db(
+                            &cli.database,
+                            &cli.embedder,
+                            cli.model.clone(),
+                            cli.dimension,
+                        )?;
+
+                        let thoughts = db.list_thoughts()?;
+                        let viz_export = indra_db::project_to_3d(&thoughts)?;
+
+                        let json = serde_json::to_string_pretty(&viz_export)?;
+
+                        if let Some(path) = output_path {
+                            std::fs::write(&path, &json)?;
+                            output(
+                                &cli.format,
+                                &serde_json::json!({
+                                    "status": "ok",
+                                    "message": format!("Exported to {}", path.display()),
+                                    "thoughts": viz_export.meta.total_thoughts,
+                                    "embedded": viz_export.meta.embedded_thoughts,
+                                    "method": viz_export.meta.reduction_method
+                                }),
+                            );
+                        } else {
+                            // Output raw JSON to stdout
+                            println!("{}", json);
+                        }
+                    }
+
+                    #[cfg(not(feature = "viz"))]
+                    {
+                        let _ = output_path; // Suppress warning
+                        output(
+                            &cli.format,
+                            &serde_json::json!({
+                                "status": "error",
+                                "message": "Visualization feature not enabled. Rebuild with --features viz"
+                            }),
+                        );
+                    }
+                }
+                _ => {
+                    output(
+                        &cli.format,
+                        &serde_json::json!({
+                            "status": "error",
+                            "message": format!("Unknown export format: {}. Supported: viz-json", format)
+                        }),
+                    );
+                }
+            }
         }
     }
 

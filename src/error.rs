@@ -46,4 +46,13 @@ pub enum Error {
 
     #[error("Version mismatch: expected {expected}, found {found}")]
     VersionMismatch { expected: u32, found: u32 },
+
+    #[error("Remote error: {0}")]
+    Remote(String),
+
+    #[error("HTTP error: {0}")]
+    Http(String),
+
+    #[error("Config error: {0}")]
+    Config(String),
 }
