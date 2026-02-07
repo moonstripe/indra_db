@@ -46,7 +46,7 @@ pub use remote::{Remote, RemoteConfig, SyncClient, SyncConfig, SyncState, PullRe
 pub use remote::refresh_access_token;
 pub use search::SearchResult;
 pub use store::ObjectStore;
-pub use viz::{VizExport, VizMeta, VizThought};
+pub use viz::{VizCommit, VizExport, VizMeta, VizThought};
 
 #[cfg(feature = "viz")]
 pub use viz::project_to_3d;

@@ -29,11 +29,29 @@ pub struct VizThought {
     pub created_at: u64,
 }
 
+/// A commit in visualization export format
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VizCommit {
+    /// The commit hash
+    pub hash: String,
+    /// Commit message
+    pub message: String,
+    /// Author identifier
+    pub author: String,
+    /// Timestamp (unix millis)
+    pub timestamp: u64,
+    /// Parent commit hashes
+    pub parents: Vec<String>,
+}
+
 /// Export format for visualization data
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VizExport {
     /// The thoughts with 3D positions
     pub thoughts: Vec<VizThought>,
+    /// Commit history (newest first)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub commits: Vec<VizCommit>,
     /// Metadata about the export
     pub meta: VizMeta,
 }

@@ -882,7 +882,20 @@ fn main() -> anyhow::Result<()> {
             #[cfg(feature = "viz")]
             let viz_export = if viz {
                 let thoughts = db.list_thoughts()?;
-                Some(indra_db::project_to_3d(&thoughts)?)
+                let commits = db.log(None)?;
+                let mut export = indra_db::project_to_3d(&thoughts)?;
+                // Add commit history to viz export
+                export.commits = commits
+                    .into_iter()
+                    .map(|(hash, commit)| indra_db::VizCommit {
+                        hash: hash.to_hex(),
+                        message: commit.message,
+                        author: commit.author,
+                        timestamp: commit.timestamp,
+                        parents: commit.parents.into_iter().map(|p| p.to_hex()).collect(),
+                    })
+                    .collect();
+                Some(export)
             } else {
                 None
             };
@@ -1664,7 +1677,20 @@ fn main() -> anyhow::Result<()> {
                         )?;
 
                         let thoughts = db.list_thoughts()?;
-                        let viz_export = indra_db::project_to_3d(&thoughts)?;
+                        let commits = db.log(None)?;
+                        let mut viz_export = indra_db::project_to_3d(&thoughts)?;
+
+                        // Add commit history
+                        viz_export.commits = commits
+                            .into_iter()
+                            .map(|(hash, commit)| indra_db::VizCommit {
+                                hash: hash.to_hex(),
+                                message: commit.message,
+                                author: commit.author,
+                                timestamp: commit.timestamp,
+                                parents: commit.parents.into_iter().map(|p| p.to_hex()).collect(),
+                            })
+                            .collect();
 
                         let json = serde_json::to_string_pretty(&viz_export)?;
 
@@ -1677,7 +1703,8 @@ fn main() -> anyhow::Result<()> {
                                     "message": format!("Exported to {}", path.display()),
                                     "thoughts": viz_export.meta.total_thoughts,
                                     "embedded": viz_export.meta.embedded_thoughts,
-                                    "method": viz_export.meta.reduction_method
+                                    "method": viz_export.meta.reduction_method,
+                                    "commits": viz_export.commits.len()
                                 }),
                             );
                         } else {

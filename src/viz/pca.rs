@@ -1,7 +1,7 @@
 //! PCA-based dimensionality reduction for visualization
 
-use crate::model::Thought;
-use crate::viz::{VizExport, VizMeta, VizThought};
+use crate::model::{Commit, Thought};
+use crate::viz::{VizCommit, VizExport, VizMeta, VizThought};
 use crate::Result;
 
 use linfa::traits::{Fit, Transformer};
@@ -31,6 +31,7 @@ pub fn project_to_3d(thoughts: &[Thought]) -> Result<VizExport> {
 
         return Ok(VizExport {
             thoughts: viz_thoughts,
+            commits: vec![],
             meta: VizMeta {
                 total_thoughts: thoughts.len(),
                 embedded_thoughts: 0,
@@ -82,6 +83,7 @@ pub fn project_to_3d(thoughts: &[Thought]) -> Result<VizExport> {
 
         return Ok(VizExport {
             thoughts: viz_thoughts,
+            commits: vec![],
             meta: VizMeta {
                 total_thoughts: thoughts.len(),
                 embedded_thoughts: embedded.len(),
@@ -196,6 +198,7 @@ pub fn project_to_3d(thoughts: &[Thought]) -> Result<VizExport> {
 
     Ok(VizExport {
         thoughts: viz_thoughts,
+        commits: vec![],
         meta: VizMeta {
             total_thoughts: thoughts.len(),
             embedded_thoughts: embedded.len(),
