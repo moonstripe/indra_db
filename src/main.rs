@@ -919,9 +919,20 @@ fn main() -> anyhow::Result<()> {
                                             .post(&viz_url)
                                             .header("Content-Type", "application/json");
 
-                                        if let indra_db::Auth::ApiKey(ref key) = sync_config.auth {
-                                            viz_request = viz_request
-                                                .header("Authorization", format!("Bearer {}", key));
+                                        match &sync_config.auth {
+                                            indra_db::Auth::AccessToken(token) => {
+                                                viz_request = viz_request.header(
+                                                    "Authorization",
+                                                    format!("Bearer {}", token),
+                                                );
+                                            }
+                                            indra_db::Auth::ApiKey(key) => {
+                                                viz_request = viz_request.header(
+                                                    "Authorization",
+                                                    format!("Bearer {}", key),
+                                                );
+                                            }
+                                            indra_db::Auth::None => {}
                                         }
 
                                         match viz_request.json(viz_data).send() {
