@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 /// We use a radix trie structure where:
 /// - Keys are thought/edge IDs converted to bytes
 /// - Values are content hashes (for leaves) or child node hashes (for branches)
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub enum TrieNode {
     /// A branch node with children indexed by key prefix
     Branch {
@@ -28,6 +28,7 @@ pub enum TrieNode {
         value: Hash,
     },
     /// An empty node
+    #[default]
     Empty,
 }
 
@@ -69,12 +70,6 @@ impl TrieNode {
             TrieNode::Branch { value, .. } => *value,
             TrieNode::Empty => None,
         }
-    }
-}
-
-impl Default for TrieNode {
-    fn default() -> Self {
-        TrieNode::Empty
     }
 }
 

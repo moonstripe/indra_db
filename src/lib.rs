@@ -41,9 +41,12 @@ pub use embedding::{Embedder, MockEmbedder};
 pub use error::{Error, Result};
 pub use graph::TraversalDirection;
 pub use model::{Commit, Edge, EdgeType, Hash, Thought, ThoughtId};
-pub use remote::{Remote, RemoteConfig, SyncClient, SyncConfig, SyncState, PullResult, Auth, CredentialStore, Credentials, UserInfo, DEFAULT_API_URL};
 #[cfg(feature = "sync")]
 pub use remote::refresh_access_token;
+pub use remote::{
+    Auth, CredentialStore, Credentials, PullResult, Remote, RemoteConfig, SyncClient, SyncConfig,
+    SyncState, UserInfo, DEFAULT_API_URL,
+};
 pub use search::SearchResult;
 pub use store::ObjectStore;
 pub use viz::{VizCommit, VizExport, VizMeta, VizThought};

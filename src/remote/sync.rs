@@ -2,7 +2,7 @@
 //!
 //! Handles push/pull operations with the remote API.
 
-use crate::remote::{CredentialStore, Credentials, Remote};
+use crate::remote::{CredentialStore, Remote};
 use crate::{Error, Result};
 use std::path::Path;
 
@@ -438,9 +438,9 @@ impl SyncClient {
                 return Ok(PushResponse {
                     success: false,
                     size_bytes: None,
-                    error: Some(format!(
-                        "Conflict detected: local and remote have diverged. Use --force to overwrite, or pull first."
-                    )),
+                    error: Some(
+                        "Conflict detected: local and remote have diverged. Use --force to overwrite, or pull first.".to_string()
+                    ),
                 });
             }
 
@@ -462,7 +462,7 @@ impl SyncClient {
         let local_head = self.get_local_head(db_path)?;
 
         // Read the database file
-        let data = std::fs::read(db_path).map_err(|e| Error::Io(e))?;
+        let data = std::fs::read(db_path).map_err(Error::Io)?;
 
         // Ensure the base exists (or create it)
         let base_id = self.ensure_base(remote)?;
@@ -531,7 +531,7 @@ impl SyncClient {
         let size = bytes.len() as u64;
 
         // Write to database path
-        std::fs::write(db_path, &bytes).map_err(|e| Error::Io(e))?;
+        std::fs::write(db_path, &bytes).map_err(Error::Io)?;
 
         Ok(size)
     }

@@ -202,9 +202,12 @@ enum Commands {
         /// Force push even if remote is ahead
         #[arg(short, long)]
         force: bool,
-        /// Also push visualization data (computed via PCA)
-        #[arg(long)]
+        /// Also push visualization data (computed via PCA). Enabled by default.
+        #[arg(long, default_value = "true")]
         viz: bool,
+        /// Skip pushing visualization data
+        #[arg(long)]
+        no_viz: bool,
     },
 
     /// Pull from a remote repository
@@ -854,7 +857,15 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
-        Commands::Push { remote, force, viz } => {
+        Commands::Push {
+            remote,
+            force,
+            viz,
+            no_viz,
+        } => {
+            // Determine if we should include viz: default true unless --no-viz
+            let include_viz = viz && !no_viz;
+
             let mut remote_config = indra_db::RemoteConfig::load(&cli.database)?;
             let remote_info = remote_config
                 .get(&remote)
@@ -878,9 +889,9 @@ fn main() -> anyhow::Result<()> {
             let log = db.log(Some(1))?;
             let head_hash = log.first().map(|(h, _)| h.to_hex()).unwrap_or_default();
 
-            // Generate viz data if requested
+            // Generate viz data if requested (default: yes)
             #[cfg(feature = "viz")]
-            let viz_export = if viz {
+            let viz_export = if include_viz {
                 let thoughts = db.list_thoughts()?;
                 let commits = db.log(None)?;
                 let mut export = indra_db::project_to_3d(&thoughts)?;
@@ -1387,6 +1398,7 @@ fn main() -> anyhow::Result<()> {
                 #[derive(serde::Deserialize)]
                 struct LoginStart {
                     url: String,
+                    #[allow(dead_code)]
                     state: String,
                     poll_url: String,
                 }
@@ -1827,8 +1839,8 @@ fn resolve_ref(
             .ok_or_else(|| anyhow::anyhow!("No commits yet"));
     }
 
-    if reference.starts_with("HEAD~") {
-        let n: usize = reference[5..].parse()?;
+    if let Some(suffix) = reference.strip_prefix("HEAD~") {
+        let n: usize = suffix.parse()?;
         return log
             .get(n)
             .map(|(h, _)| *h)
