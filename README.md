@@ -5,6 +5,13 @@ A content-addressed graph database for versioned thoughts. Think **git for knowl
 [![Crates.io](https://img.shields.io/crates/v/indra_db.svg)](https://crates.io/crates/indra_db)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+## Who is Indra for?
+
+**Solo developers using AI coding assistants** (Claude Code, Cursor, Copilot) who lose context between sessions. Your agent forgets your preferences, past decisions, and ongoing projects every time you start a new conversation. Indra gives your agent persistent, versioned memory — so it remembers what you've told it and builds on that knowledge over time.
+
+> *"I told Claude my architecture preference three sessions ago. Now it's recommending the opposite and doesn't remember why."*  
+> — Every developer using AI assistants
+
 ## Why?
 
 Most agent memory systems are **state-based**: here's what I know *now*. But understanding isn't a snapshot—it's a trajectory. When an agent rewrites a note, it loses:
@@ -18,6 +25,55 @@ Most agent memory systems are **state-based**: here's what I know *now*. But und
 - **Git-like versioning**: Content-addressed storage, commits, branches
 - **Graph semantics**: Thoughts as nodes, typed/weighted relationships as edges
 - **Semantic search**: Embeddings stored with nodes, vector similarity queries
+
+## Real-World Use Case: Debug Why Your Agent Changed Its Mind
+
+**Scenario:** Your AI coding assistant initially recommended "Use microservices" for a project, but two conversations later switched to "Use a monolith." Why?
+
+**Without Indra:**
+- Prompt logs show final answers, not reasoning evolution
+- No way to compare intermediate states
+- Can't isolate which context shift caused the flip
+- Lost context between sessions means the agent doesn't even remember it changed
+
+**With Indra:**
+```bash
+# Agent stores reasoning as versioned thoughts across conversations
+indra create "Team is building a new e-commerce platform. Recommending microservices for scalability." --id arch-rec
+
+# Two sessions later, agent updates its recommendation
+indra update arch-rec "After learning team size is 3, recommending monolith-first for faster iteration."
+
+# You can see exactly what changed and when
+indra log
+# commit 3f8a... "Update arch-rec"
+# commit a1b2... "Create arch-rec"
+
+# Diff shows the reasoning shift
+indra diff a1b2 3f8a
+# Modified: arch-rec
+#   - "...Recommending microservices for scalability."
+#   + "...recommending monolith-first for faster iteration."
+
+# Branch to explore the road not taken
+indra branch microservices-deep-dive
+indra checkout microservices-deep-dive
+indra create "If team grows to 8+, revisit microservices with these boundaries..."
+```
+
+**Result:** Full transparency into agent decision-making → higher trust, easier debugging, and the ability to explore "what if" reasoning paths.
+
+## How Indra Compares
+
+| Feature | Indra | medha-mcp | git-notes-memory | Grigori |
+|---------|-------|-----------|------------------|---------| 
+| **Branching** | ✅ Multi-branch exploration | ❌ Linear only | ❌ Linear only | ❌ |
+| **Diff/Compare** | ✅ Commit-level diffs | ❌ | ❌ | ❌ |
+| **Semantic Search** | ✅ HF embeddings (local) | ✅ | ✅ | ✅ |
+| **Graph Relations** | ✅ Typed + weighted edges | ❌ | ❌ | ✅ |
+| **Single-File DB** | ✅ Portable `.indra` file | ❌ Repo-based | ❌ Repo-based | ❌ |
+| **3D Visualization** | ✅ PCA → WebGL (via IndraNet) | ❌ | ❌ | ❌ |
+| **Offline-First** | ✅ Full local operation | ✅ | ✅ | ❌ |
 
 ## Installation
 
