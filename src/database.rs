@@ -112,6 +112,10 @@ impl Database {
         // Generate embedding if we have an embedder
         if let Some(ref embedder) = self.embedder {
             thought.embedding = Some(embedder.embed(&thought.content)?);
+            thought.attrs.insert(
+                "embedder_model".to_string(),
+                serde_json::Value::String(embedder.model_name().to_string()),
+            );
         }
 
         let id = thought.id.clone();
@@ -133,6 +137,10 @@ impl Database {
 
         if let Some(ref embedder) = self.embedder {
             thought.embedding = Some(embedder.embed(&thought.content)?);
+            thought.attrs.insert(
+                "embedder_model".to_string(),
+                serde_json::Value::String(embedder.model_name().to_string()),
+            );
         }
 
         self.working_tree.thoughts.insert(id.clone(), thought);
@@ -175,6 +183,10 @@ impl Database {
         // Re-embed if we have an embedder
         if let Some(ref embedder) = self.embedder {
             thought.embedding = Some(embedder.embed(&thought.content)?);
+            thought.attrs.insert(
+                "embedder_model".to_string(),
+                serde_json::Value::String(embedder.model_name().to_string()),
+            );
         }
 
         self.working_tree.thoughts.insert(id.clone(), thought);

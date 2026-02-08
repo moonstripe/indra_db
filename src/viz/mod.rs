@@ -65,4 +65,7 @@ pub struct VizMeta {
     /// Variance explained by the 3 principal components (if PCA)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub variance_explained: Option<[f64; 3]>,
+    /// The embedding model that generated the vectors (e.g., "sentence-transformers/all-MiniLM-L6-v2")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedder_model: Option<String>,
 }
