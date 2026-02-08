@@ -202,12 +202,6 @@ enum Commands {
         /// Force push even if remote is ahead
         #[arg(short, long)]
         force: bool,
-        /// Also push visualization data (computed via PCA). Enabled by default.
-        #[arg(long, default_value = "true")]
-        viz: bool,
-        /// Skip pushing visualization data
-        #[arg(long)]
-        no_viz: bool,
     },
 
     /// Pull from a remote repository
@@ -247,8 +241,8 @@ enum Commands {
 
     /// Export database in various formats
     Export {
-        /// Export format: viz-json (3D visualization data)
-        #[arg(short, long, default_value = "viz-json")]
+        /// Export format: json (raw thoughts and commits)
+        #[arg(short, long, default_value = "json")]
         format: String,
         /// Output file (default: stdout)
         #[arg(short, long)]
@@ -857,15 +851,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
-        Commands::Push {
-            remote,
-            force,
-            viz,
-            no_viz,
-        } => {
-            // Determine if we should include viz: default true unless --no-viz
-            let include_viz = viz && !no_viz;
-
+        Commands::Push { remote, force } => {
             let mut remote_config = indra_db::RemoteConfig::load(&cli.database)?;
             let remote_info = remote_config
                 .get(&remote)
@@ -889,37 +875,13 @@ fn main() -> anyhow::Result<()> {
             let log = db.log(Some(1))?;
             let head_hash = log.first().map(|(h, _)| h.to_hex()).unwrap_or_default();
 
-            // Generate viz data if requested (default: yes)
-            #[cfg(feature = "viz")]
-            let viz_export = if include_viz {
-                let thoughts = db.list_thoughts()?;
-                let commits = db.log(None)?;
-                let mut export = indra_db::project_to_3d(&thoughts)?;
-                // Add commit history to viz export
-                export.commits = commits
-                    .into_iter()
-                    .map(|(hash, commit)| indra_db::VizCommit {
-                        hash: hash.to_hex(),
-                        message: commit.message,
-                        author: commit.author,
-                        timestamp: commit.timestamp,
-                        parents: commit.parents.into_iter().map(|p| p.to_hex()).collect(),
-                    })
-                    .collect();
-                Some(export)
-            } else {
-                None
-            };
-            #[cfg(not(feature = "viz"))]
-            let viz_export: Option<()> = None;
-
             drop(db); // Close database before push
 
             // Create sync client and push
             #[cfg(feature = "sync")]
             {
                 let sync_config = indra_db::SyncConfig::from_env();
-                let client = indra_db::SyncClient::new(sync_config.clone())?;
+                let client = indra_db::SyncClient::new(sync_config)?;
 
                 match client.push(&cli.database, &remote_info, force) {
                     Ok(result) => {
@@ -927,69 +889,6 @@ fn main() -> anyhow::Result<()> {
                             // Update last_sync time
                             remote_config.update_last_sync(&remote)?;
                             remote_config.save(&cli.database)?;
-
-                            // Push viz data if we have it
-                            #[cfg(feature = "viz")]
-                            let viz_pushed = if let Some(ref viz_data) = viz_export {
-                                match client.get_base(&remote_info) {
-                                    Ok(Some(base_id)) => {
-                                        let viz_url = format!(
-                                            "{}/bases/{}/viz",
-                                            sync_config.api_url.trim_end_matches('/'),
-                                            base_id
-                                        );
-                                        let viz_client = reqwest::blocking::Client::new();
-                                        let mut viz_request = viz_client
-                                            .post(&viz_url)
-                                            .header("Content-Type", "application/json");
-
-                                        match &sync_config.auth {
-                                            indra_db::Auth::AccessToken(token) => {
-                                                viz_request = viz_request.header(
-                                                    "Authorization",
-                                                    format!("Bearer {}", token),
-                                                );
-                                            }
-                                            indra_db::Auth::ApiKey(key) => {
-                                                viz_request = viz_request.header(
-                                                    "Authorization",
-                                                    format!("Bearer {}", key),
-                                                );
-                                            }
-                                            indra_db::Auth::None => {}
-                                        }
-
-                                        match viz_request.json(viz_data).send() {
-                                            Ok(resp) if resp.status().is_success() => true,
-                                            Ok(resp) => {
-                                                eprintln!(
-                                                    "Viz push failed: {} - {}",
-                                                    resp.status(),
-                                                    resp.text().unwrap_or_default()
-                                                );
-                                                false
-                                            }
-                                            Err(e) => {
-                                                eprintln!("Viz push error: {}", e);
-                                                false
-                                            }
-                                        }
-                                    }
-                                    Ok(None) => {
-                                        eprintln!("Viz push skipped: base not found");
-                                        false
-                                    }
-                                    Err(e) => {
-                                        eprintln!("Viz push error getting base: {}", e);
-                                        false
-                                    }
-                                }
-                            } else {
-                                false
-                            };
-
-                            #[cfg(not(feature = "viz"))]
-                            let viz_pushed = false;
 
                             output(
                                 &cli.format,
@@ -999,8 +898,7 @@ fn main() -> anyhow::Result<()> {
                                     "remote": remote_info.name,
                                     "url": remote_info.url,
                                     "local_head": head_hash,
-                                    "size_bytes": result.size_bytes,
-                                    "viz_pushed": viz_pushed
+                                    "size_bytes": result.size_bytes
                                 }),
                             );
                         } else {
@@ -1031,7 +929,6 @@ fn main() -> anyhow::Result<()> {
 
             #[cfg(not(feature = "sync"))]
             {
-                let _ = viz_export; // Suppress warning
                 output(
                     &cli.format,
                     &serde_json::json!({
@@ -1677,64 +1574,60 @@ fn main() -> anyhow::Result<()> {
             format,
             output: output_path,
         } => {
+            let db = open_db(
+                &cli.database,
+                &cli.embedder,
+                cli.model.clone(),
+                cli.dimension,
+            )?;
+
             match format.as_str() {
-                "viz-json" => {
-                    #[cfg(feature = "viz")]
-                    {
-                        let db = open_db(
-                            &cli.database,
-                            &cli.embedder,
-                            cli.model.clone(),
-                            cli.dimension,
-                        )?;
+                "json" => {
+                    let thoughts = db.list_thoughts()?;
+                    let commits = db.log(None)?;
 
-                        let thoughts = db.list_thoughts()?;
-                        let commits = db.log(None)?;
-                        let mut viz_export = indra_db::project_to_3d(&thoughts)?;
-
-                        // Add commit history
-                        viz_export.commits = commits
-                            .into_iter()
-                            .map(|(hash, commit)| indra_db::VizCommit {
-                                hash: hash.to_hex(),
-                                message: commit.message,
-                                author: commit.author,
-                                timestamp: commit.timestamp,
-                                parents: commit.parents.into_iter().map(|p| p.to_hex()).collect(),
+                    // Build export data
+                    let export_data = serde_json::json!({
+                        "thoughts": thoughts.iter().map(|t| {
+                            serde_json::json!({
+                                "id": t.id.0,
+                                "content": t.content,
+                                "thought_type": t.thought_type,
+                                "created_at": t.created_at,
+                                "embedding_dim": t.embedding.as_ref().map(|e| e.len()),
                             })
-                            .collect();
-
-                        let json = serde_json::to_string_pretty(&viz_export)?;
-
-                        if let Some(path) = output_path {
-                            std::fs::write(&path, &json)?;
-                            output(
-                                &cli.format,
-                                &serde_json::json!({
-                                    "status": "ok",
-                                    "message": format!("Exported to {}", path.display()),
-                                    "thoughts": viz_export.meta.total_thoughts,
-                                    "embedded": viz_export.meta.embedded_thoughts,
-                                    "method": viz_export.meta.reduction_method,
-                                    "commits": viz_export.commits.len()
-                                }),
-                            );
-                        } else {
-                            // Output raw JSON to stdout
-                            println!("{}", json);
+                        }).collect::<Vec<_>>(),
+                        "commits": commits.iter().map(|(hash, commit)| {
+                            serde_json::json!({
+                                "hash": hash.to_hex(),
+                                "message": commit.message,
+                                "author": commit.author,
+                                "timestamp": commit.timestamp,
+                                "parents": commit.parents.iter().map(|p| p.to_hex()).collect::<Vec<_>>(),
+                            })
+                        }).collect::<Vec<_>>(),
+                        "meta": {
+                            "total_thoughts": thoughts.len(),
+                            "total_commits": commits.len(),
                         }
-                    }
+                    });
 
-                    #[cfg(not(feature = "viz"))]
-                    {
-                        let _ = output_path; // Suppress warning
+                    let json = serde_json::to_string_pretty(&export_data)?;
+
+                    if let Some(path) = output_path {
+                        std::fs::write(&path, &json)?;
                         output(
                             &cli.format,
                             &serde_json::json!({
-                                "status": "error",
-                                "message": "Visualization feature not enabled. Rebuild with --features viz"
+                                "status": "ok",
+                                "message": format!("Exported to {}", path.display()),
+                                "thoughts": thoughts.len(),
+                                "commits": commits.len()
                             }),
                         );
+                    } else {
+                        // Output raw JSON to stdout
+                        println!("{}", json);
                     }
                 }
                 _ => {
@@ -1742,7 +1635,7 @@ fn main() -> anyhow::Result<()> {
                         &cli.format,
                         &serde_json::json!({
                             "status": "error",
-                            "message": format!("Unknown export format: {}. Supported: viz-json", format)
+                            "message": format!("Unknown export format: {}. Supported: json", format)
                         }),
                     );
                 }

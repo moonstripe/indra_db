@@ -1,6 +1,6 @@
 [package]
 name = "indra_db"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 description = "A content-addressed graph database for versioned thoughts"
 license = "MIT"
@@ -61,9 +61,6 @@ dirs = "5.0"
 
 # Open browser for login
 open = "5.0"
-linfa = { version = "0.8.1", optional = true }
-linfa-reduction = { version = "0.8.1", optional = true }
-ndarray = { version = "0.16", optional = true }
 
 [dev-dependencies]
 tempfile = "3.10"
@@ -74,13 +71,9 @@ lto = true
 codegen-units = 1
 
 [features]
-default = ["hf-embeddings", "sync", "viz"]
+default = ["hf-embeddings", "sync"]
 hf-embeddings = ["candle-core", "candle-nn", "candle-transformers", "hf-hub", "tokenizers", "tokio"]
 api-embeddings = ["reqwest", "tokio"]
 sync = ["reqwest", "tokio"]
-viz = ["linfa", "linfa-reduction", "ndarray"]
-linfa = ["dep:linfa"]
-linfa-reduction = ["dep:linfa-reduction"]
-ndarray = ["dep:ndarray"]
 # For testing without heavy deps
 mock-embeddings = []

@@ -1,13 +1,8 @@
-//! Visualization support for Indra knowledge bases
+//! Visualization data types for Indra knowledge bases
 //!
-//! This module provides dimensionality reduction (PCA) to project
-//! high-dimensional embeddings into 3D space for visualization.
-
-#[cfg(feature = "viz")]
-mod pca;
-
-#[cfg(feature = "viz")]
-pub use pca::*;
+//! This module defines the data structures used for visualization.
+//! Actual dimensionality reduction (PCA, t-SNE, etc.) is performed
+//! server-side by IndraNet, not in the CLI.
 
 use serde::{Deserialize, Serialize};
 

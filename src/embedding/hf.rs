@@ -46,16 +46,19 @@ impl HFEmbedder {
     /// If HF_TOKEN is set, it will be used for authentication.
     ///
     /// # Example
-    /// ```no_run
+    /// ```ignore
     /// use indra_db::embedding::HFEmbedder;
     ///
-    /// // Will use ~/.cache/huggingface by default
-    /// let embedder = HFEmbedder::new("sentence-transformers/all-MiniLM-L6-v2").await?;
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     // Will use ~/.cache/huggingface by default
+    ///     let embedder = HFEmbedder::new("sentence-transformers/all-MiniLM-L6-v2").await?;
     ///
-    /// // Or set custom cache location
-    /// std::env::set_var("HF_HOME", "/custom/cache/path");
-    /// let embedder = HFEmbedder::new("BAAI/bge-small-en-v1.5").await?;
-    /// # Ok::<(), indra_db::Error>(())
+    ///     // Or set custom cache location
+    ///     std::env::set_var("HF_HOME", "/custom/cache/path");
+    ///     let embedder = HFEmbedder::new("BAAI/bge-small-en-v1.5").await?;
+    ///     Ok(())
+    /// }
     /// ```
     #[cfg(feature = "hf-embeddings")]
     pub async fn new(model_name: &str) -> Result<Self> {

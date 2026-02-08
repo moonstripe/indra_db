@@ -51,9 +51,6 @@ pub use search::SearchResult;
 pub use store::ObjectStore;
 pub use viz::{VizCommit, VizExport, VizMeta, VizThought};
 
-#[cfg(feature = "viz")]
-pub use viz::project_to_3d;
-
 /// Database version for format compatibility
 pub const VERSION: u32 = 1;
 
