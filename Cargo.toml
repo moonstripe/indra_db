@@ -1,6 +1,6 @@
 [package]
 name = "indra_db"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2021"
 description = "A content-addressed graph database for versioned thoughts"
 license = "MIT"
