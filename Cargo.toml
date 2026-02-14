@@ -54,7 +54,7 @@ candle-transformers = { version = "0.8", optional = true }
 hf-hub = { version = "0.4", optional = true, features = ["tokio"] }
 tokenizers = { version = "0.21", optional = true }
 tokio = { version = "1.42", optional = true, features = ["full"] }
-reqwest = { version = "0.12", optional = true, features = ["json", "blocking"] }
+reqwest = { version = "0.12", optional = true, default-features = false, features = ["json", "blocking", "rustls-tls"] }
 
 # Directories for config storage
 dirs = "5.0"

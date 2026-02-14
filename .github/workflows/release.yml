@@ -27,54 +27,56 @@ jobs:
             os: macos-latest
             binary_name: indra
             archive_name: indra-x86_64-apple-darwin.tar.gz
+            use_cross: false
 
           # macOS Apple Silicon
           - target: aarch64-apple-darwin
             os: macos-latest
             binary_name: indra
             archive_name: indra-aarch64-apple-darwin.tar.gz
+            use_cross: false
 
           # Linux x86_64 (glibc)
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             binary_name: indra
             archive_name: indra-x86_64-unknown-linux-gnu.tar.gz
+            use_cross: false
 
           # Linux x86_64 (musl - static)
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
             binary_name: indra
             archive_name: indra-x86_64-unknown-linux-musl.tar.gz
+            use_cross: true
 
-          # Linux ARM64
+          # Linux ARM64 - use cross for proper sysroot
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             binary_name: indra
             archive_name: indra-aarch64-unknown-linux-gnu.tar.gz
+            use_cross: true
 
           # Linux ARM64 (musl)
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
             binary_name: indra
             archive_name: indra-aarch64-unknown-linux-musl.tar.gz
-
-          # Raspberry Pi (ARMv7)
-          - target: armv7-unknown-linux-gnueabihf
-            os: ubuntu-latest
-            binary_name: indra
-            archive_name: indra-armv7-unknown-linux-gnueabihf.tar.gz
+            use_cross: true
 
           # Windows x86_64
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             binary_name: indra.exe
             archive_name: indra-x86_64-pc-windows-msvc.zip
+            use_cross: false
 
           # Windows ARM64
           - target: aarch64-pc-windows-msvc
             os: windows-latest
             binary_name: indra.exe
             archive_name: indra-aarch64-pc-windows-msvc.zip
+            use_cross: false
 
     steps:
       - name: Checkout code
@@ -103,25 +105,22 @@ jobs:
           path: target
           key: ${{ runner.os }}-${{ matrix.target }}-cargo-target-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Install cross-compilation tools (Linux ARM)
-        if: runner.os == 'Linux' && contains(matrix.target, 'aarch64')
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Install cross
+        if: matrix.use_cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
 
-      - name: Install cross-compilation tools (Linux ARMv7)
-        if: runner.os == 'Linux' && contains(matrix.target, 'armv7')
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-arm-linux-gnueabihf
-
-      - name: Install musl tools
-        if: contains(matrix.target, 'musl')
+      - name: Install musl tools (native musl build)
+        if: matrix.target == 'x86_64-unknown-linux-musl' && !matrix.use_cross
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools
 
-      - name: Build binary
+      - name: Build binary (cross)
+        if: matrix.use_cross
+        run: cross build --release --locked --target ${{ matrix.target }}
+
+      - name: Build binary (native)
+        if: "!matrix.use_cross"
         run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Strip binary (Unix)
@@ -223,7 +222,6 @@ jobs:
             - **Linux x86_64 (musl/static)**: `indra-x86_64-unknown-linux-musl.tar.gz`
             - **Linux ARM64**: `indra-aarch64-unknown-linux-gnu.tar.gz`
             - **Linux ARM64 (musl)**: `indra-aarch64-unknown-linux-musl.tar.gz`
-            - **Raspberry Pi (ARMv7)**: `indra-armv7-unknown-linux-gnueabihf.tar.gz`
             - **Windows x86_64**: `indra-x86_64-pc-windows-msvc.zip`
             - **Windows ARM64**: `indra-aarch64-pc-windows-msvc.zip`
 
@@ -238,3 +236,19 @@ jobs:
             See [README](https://github.com/moonstripe/indra_db#readme) for full documentation.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-crates:
+    name: Publish to crates.io
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish to crates.io
+        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
