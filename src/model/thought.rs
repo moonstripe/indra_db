@@ -1,9 +1,58 @@
 //! Thought (node) type - the fundamental unit of knowledge
 
 use super::Hash;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Wrapper type for storing JSON values that is compatible with bincode.
+///
+/// bincode doesn't support `serde_json::Value` because it uses `deserialize_any`,
+/// so we serialize JSON values to strings for storage.
+#[derive(Clone, Debug, PartialEq)]
+pub struct JsonValue(pub serde_json::Value);
+
+impl JsonValue {
+    pub fn new(value: serde_json::Value) -> Self {
+        JsonValue(value)
+    }
+}
+
+impl From<serde_json::Value> for JsonValue {
+    fn from(v: serde_json::Value) -> Self {
+        JsonValue(v)
+    }
+}
+
+impl From<JsonValue> for serde_json::Value {
+    fn from(v: JsonValue) -> Self {
+        v.0
+    }
+}
+
+impl Serialize for JsonValue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Serialize the JSON value as a string
+        let json_string = serde_json::to_string(&self.0).map_err(serde::ser::Error::custom)?;
+        serializer.serialize_str(&json_string)
+    }
+}
+
+impl<'de> Deserialize<'de> for JsonValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // Deserialize as string, then parse as JSON
+        let json_string = String::deserialize(deserializer)?;
+        let value: serde_json::Value =
+            serde_json::from_str(&json_string).map_err(serde::de::Error::custom)?;
+        Ok(JsonValue(value))
+    }
+}
 
 /// Unique identifier for a thought (semantic ID, not content hash)
 /// This allows thoughts to evolve while maintaining identity
@@ -82,8 +131,8 @@ pub struct Thought {
     /// Dimension is configurable at database level
     pub embedding: Option<Vec<f32>>,
 
-    /// Arbitrary metadata
-    pub attrs: HashMap<String, serde_json::Value>,
+    /// Arbitrary metadata (stored as JSON strings for bincode compatibility)
+    pub attrs: HashMap<String, JsonValue>,
 
     /// Creation timestamp (unix millis)
     pub created_at: u64,
@@ -147,8 +196,13 @@ impl Thought {
         key: impl Into<String>,
         value: impl Into<serde_json::Value>,
     ) -> Self {
-        self.attrs.insert(key.into(), value.into());
+        self.attrs.insert(key.into(), JsonValue::new(value.into()));
         self
+    }
+
+    /// Get a metadata attribute
+    pub fn get_attr(&self, key: &str) -> Option<&serde_json::Value> {
+        self.attrs.get(key).map(|v| &v.0)
     }
 
     /// Compute the content hash of this thought
@@ -209,7 +263,7 @@ mod tests {
 
         assert_eq!(thought.thought_type, Some("hypothesis".to_string()));
         assert_eq!(
-            thought.attrs.get("confidence"),
+            thought.get_attr("confidence"),
             Some(&serde_json::json!(0.8))
         );
     }

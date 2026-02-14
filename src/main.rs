@@ -336,6 +336,9 @@ fn main() -> anyhow::Result<()> {
             let thought_id = indra_db::ThoughtId::new(&id);
             match db.get_thought(&thought_id)? {
                 Some(thought) => {
+                    // Convert JsonValue attrs to serde_json::Value for output
+                    let attrs: std::collections::HashMap<String, serde_json::Value> =
+                        thought.attrs.into_iter().map(|(k, v)| (k, v.0)).collect();
                     output(
                         &cli.format,
                         &serde_json::json!({
@@ -344,7 +347,7 @@ fn main() -> anyhow::Result<()> {
                             "type": thought.thought_type,
                             "created_at": thought.created_at,
                             "modified_at": thought.modified_at,
-                            "attrs": thought.attrs,
+                            "attrs": attrs,
                             "has_embedding": thought.embedding.is_some()
                         }),
                     );

@@ -4,7 +4,7 @@
 
 use crate::embedding::Embedder;
 use crate::graph::GraphView;
-use crate::model::{Commit, Edge, EdgeType, Hash, Thought, ThoughtId};
+use crate::model::{Commit, Edge, EdgeType, Hash, JsonValue, Thought, ThoughtId};
 use crate::ops::{diff_trees, BranchManager, Diff};
 use crate::search::{SearchResult, VectorSearch};
 use crate::store::ObjectStore;
@@ -114,7 +114,7 @@ impl Database {
             thought.embedding = Some(embedder.embed(&thought.content)?);
             thought.attrs.insert(
                 "embedder_model".to_string(),
-                serde_json::Value::String(embedder.model_name().to_string()),
+                JsonValue::new(serde_json::Value::String(embedder.model_name().to_string())),
             );
         }
 
@@ -139,7 +139,7 @@ impl Database {
             thought.embedding = Some(embedder.embed(&thought.content)?);
             thought.attrs.insert(
                 "embedder_model".to_string(),
-                serde_json::Value::String(embedder.model_name().to_string()),
+                JsonValue::new(serde_json::Value::String(embedder.model_name().to_string())),
             );
         }
 
@@ -185,7 +185,7 @@ impl Database {
             thought.embedding = Some(embedder.embed(&thought.content)?);
             thought.attrs.insert(
                 "embedder_model".to_string(),
-                serde_json::Value::String(embedder.model_name().to_string()),
+                JsonValue::new(serde_json::Value::String(embedder.model_name().to_string())),
             );
         }
 

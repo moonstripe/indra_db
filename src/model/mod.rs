@@ -8,4 +8,4 @@ mod thought;
 pub use commit::Commit;
 pub use edge::{Edge, EdgeType};
 pub use hash::Hash;
-pub use thought::{Thought, ThoughtId};
+pub use thought::{JsonValue, Thought, ThoughtId};
