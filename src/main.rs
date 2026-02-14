@@ -256,7 +256,7 @@ enum RemoteCommands {
     Add {
         /// Name for the remote (e.g., origin)
         name: String,
-        /// URL of the remote (e.g., username/repo or https://indra.dev/username/repo)
+        /// URL of the remote (e.g., username/repo or https://indradb.net/username/repo)
         url: String,
     },
 

@@ -6,8 +6,8 @@ use crate::remote::{CredentialStore, Remote};
 use crate::{Error, Result};
 use std::path::Path;
 
-/// Default API base URL
-pub const DEFAULT_API_URL: &str = "https://indra-net-api.moonstripe.workers.dev";
+/// Default API base URL (production)
+pub const DEFAULT_API_URL: &str = "https://api.indradb.net";
 
 /// Authentication credentials
 #[derive(Clone, Debug)]

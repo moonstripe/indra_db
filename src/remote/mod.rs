@@ -22,7 +22,7 @@ pub use sync::{
 pub struct Remote {
     /// Name of the remote (e.g., "origin")
     pub name: String,
-    /// URL of the remote (e.g., "username/repo" or "https://indra.dev/username/repo")
+    /// URL of the remote (e.g., "username/repo" or "https://indradb.net/username/repo")
     pub url: String,
     /// Last known HEAD commit hash on the remote
     #[serde(default)]
@@ -46,11 +46,16 @@ impl Remote {
     pub fn parse_url(&self) -> Option<(String, String)> {
         let url = self.url.trim();
 
-        // Handle full URLs: https://indra.dev/username/repo
+        // Handle full URLs: https://indradb.net/username/repo
         if url.starts_with("https://") || url.starts_with("http://") {
             let path = url
                 .trim_start_matches("https://")
                 .trim_start_matches("http://")
+                .trim_start_matches("indradb.net/")
+                .trim_start_matches("api.indradb.net/")
+                // Legacy domain support
+                .trim_start_matches("indra.net/")
+                .trim_start_matches("api.indra.net/")
                 .trim_start_matches("indra.dev/")
                 .trim_start_matches("api.indra.dev/");
             return Self::parse_path(path);
@@ -232,13 +237,20 @@ mod tests {
             Some(("username".to_string(), "repo".to_string()))
         );
 
-        let remote = Remote::new("origin", "https://indra.dev/username/repo");
+        let remote = Remote::new("origin", "https://indradb.net/username/repo");
         assert_eq!(
             remote.parse_url(),
             Some(("username".to_string(), "repo".to_string()))
         );
 
-        let remote = Remote::new("origin", "https://api.indra.dev/username/repo");
+        let remote = Remote::new("origin", "https://api.indradb.net/username/repo");
+        assert_eq!(
+            remote.parse_url(),
+            Some(("username".to_string(), "repo".to_string()))
+        );
+
+        // Legacy domains should still work
+        let remote = Remote::new("origin", "https://indra.dev/username/repo");
         assert_eq!(
             remote.parse_url(),
             Some(("username".to_string(), "repo".to_string()))
